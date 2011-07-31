@@ -726,7 +726,6 @@ class ViewerWindow(pyglet.window.Window):
         return pyglet.window.Window.on_resize(self, width, height)
 
 if __name__ == '__main__':
-    WINDOW = ViewerWindow()
-    WINDOW.set_visible(True)
+    ViewerWindow().set_visible(True)
 
     pyglet.app.run()
