@@ -114,7 +114,6 @@ class TriMeshGL( object ):
             n = len(points)*3
 
             idxs = numpy.cast[constants.INTDTYPE](numpy.mgrid[0:n] )
-
             iptr = vecutil.numpy2pointer(idxs)
         else:
             idxs = self.mesh.indicies
@@ -128,6 +127,10 @@ class TriMeshGL( object ):
         self.drawVNC( vptr, vptr, cptr, iptr, n )
 
     def drawVNC( self, vptr, nptr, cptr, iptr, n ):
+        mode = self.ui.fillModes[self.ui.fillMode]
+
+        gl.glPolygonMode( GL_FRONT, mode )
+        
         gl.glEnable( GL_NORMALIZE )
 
         gl.glEnableClientState(GL_VERTEX_ARRAY)
@@ -136,11 +139,13 @@ class TriMeshGL( object ):
         gl.glVertexPointer(3, GL_FLOAT, 0, vptr)
         gl.glNormalPointer( GL_FLOAT, 0, nptr)
         gl.glColorPointer(3, GL_FLOAT, 0, cptr)
-        gl.glDrawElements(self.ui.fillModes[self.ui.fillMode], n, GL_UNSIGNED_INT, iptr)
+        gl.glDrawElements(gl.GL_TRIANGLES, n, GL_UNSIGNED_INT, iptr)
 
         gl.glDisableClientState(GL_VERTEX_ARRAY)
         gl.glDisableClientState(GL_NORMAL_ARRAY)
         gl.glDisableClientState(GL_COLOR_ARRAY)
+
+        gl.glPolygonMode( GL_FRONT, gl.GL_FILL )
 
 class ViewerWindow(pyglet.window.Window):
     PADDING = 4
@@ -256,7 +261,7 @@ class ViewerWindow(pyglet.window.Window):
         self.solverKindButton.text = self.solverKindNames[self.solverKind]
 
         self.fillMode = 1
-        self.fillModes = ( gl.GL_LINES, gl.GL_TRIANGLES, gl.GL_POINTS)
+        self.fillModes = ( gl.GL_LINE, gl.GL_FILL, gl.GL_POINT)
         self.fillModeNames = ( 'lines', 'solid', 'pnts' )
         self.fillModeButton.text = self.fillModeNames[self.fillMode]
 
@@ -648,8 +653,7 @@ class ViewerWindow(pyglet.window.Window):
         gl.glTranslatef( 1.0, -.5, 0)
         gl.glScalef( 1.0/math.pi, 1.0/math.pi, 1)
         
-        gl.glRotatef( -90, 0, 1, 0 )
-        gl.glRotatef( -90, 1, 0, 0 )
+        self.zup.glMultMatrix()
         self.mesh.draw( 0.06, False )
         gl.glPopMatrix()
 
