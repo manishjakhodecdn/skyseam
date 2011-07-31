@@ -35,6 +35,3 @@
 
 DTYPE = 'f4'
 INTDTYPE = 'i4'
-UI = True
-
-__all__ = ['DTYPE']

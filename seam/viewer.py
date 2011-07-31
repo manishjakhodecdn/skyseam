@@ -56,6 +56,12 @@ def glmultmatrix( mx ):
     else:
         pyglet.gl.glMultMatrixf( mxptr )
 
+class TransformGL( Transform ):
+    'extend Transform with glmultmatrix'
+    def glmultmatrix( self ):
+        'emit object to world in gl stream'
+        glmultmatrix( self. otw )
+
 class TriMeshGL( object ):
     'OpenGL wrapper for a TriMesh'
     kxyz = 'kxyz'
@@ -237,7 +243,7 @@ class ViewerWindow(pyglet.window.Window):
         self.manipstate = None
 
         self.manipstart = None
-        self.viewtransform = Transform()
+        self.viewtransform = TransformGL()
         self.manipviewtransform = None
 
         self.mousescreen = vecutil.vec3()
@@ -254,7 +260,7 @@ class ViewerWindow(pyglet.window.Window):
         self.view = Frustum().rtnf(( 1, 1, -5, 5 )).orthographic()
         self.view.ctw = vecutil.mat4()
 
-        self.zup = Transform()
+        self.zup = TransformGL()
         self.zup._order = ( self.zup.kscale
                            ,self.zup.kxrotate
                            ,self.zup.kyrotate
@@ -446,7 +452,7 @@ class ViewerWindow(pyglet.window.Window):
         current = vecutil.vec3(x, y)
         delta = current - self.manipstart
 
-        self.manipviewtransform = Transform(self.viewtransform)
+        self.manipviewtransform = TransformGL(self.viewtransform)
 
         if self.manipstate == self.korbit:
             self.manipviewtransform.ry += delta[0] *  .01

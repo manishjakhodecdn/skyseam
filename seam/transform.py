@@ -36,12 +36,6 @@ import numpy
 import vecutil
 import constants
 
-if constants.UI:
-    import pyglet
-else:
-    pyglet = None
-
-
 class Transform( object ):
     '''compose translate rotate scale as 4x4 matrix
     access object to world and world to object xforms as properties
@@ -109,19 +103,6 @@ class Transform( object ):
         'uncached scale 4x4'
         return vecutil.scalematrix( self._sx, self._sy, self._sz )
 
-    if constants.UI:
-        def glMultMatrix( self ):
-            'when a pyglet ui is available, emit object to world in gl stream'
-            mxptr = vecutil.numpy2pointer( self.otw )
-            size = self.otw.dtype.itemsize
-
-            if size not in (4,8):
-                raise Warning('matrix data must be 4 or 8 bytes')
-            if size == 8:
-                pyglet.gl.glMultMatrixd( mxptr )
-            else:
-                pyglet.gl.glMultMatrixf( mxptr )
-    
     def _update( self ):
         'compose object space matrix'
         if self._dirty:
