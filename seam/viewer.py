@@ -31,29 +31,25 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 # ----------------------------------------------------------------------------
-'simple opengl / pyglet based viewer for seam'
+'opengl / pyglet based viewer for seam'
 
-from pyglet.gl import *
-import pyglet
-from pyglet.window import key
-import numpy
-import ctypes
-import controls
 import math
+import numpy
+import pyglet
 import vecutil
-from solver import SeamSolver
+import controls
 import constants
-from trimesh import TriMesh
-from transform import Transform
+from pyglet import gl
 from frustum import Frustum
+from solver import SeamSolver
+from transform import Transform
 
-
-def glMultMatrix( mx ):
+def glmultmatrix( mx ):
     'transform the gl stream'
     mxptr = vecutil.numpy2pointer( mx )
     size = mx.dtype.itemsize
 
-    if size not in (4,8):
+    if size not in (4, 8):
         raise Warning('matrix data must be 4 or 8 bytes')
     if size == 8:
         pyglet.gl.glMultMatrixd( mxptr )
@@ -61,6 +57,7 @@ def glMultMatrix( mx ):
         pyglet.gl.glMultMatrixf( mxptr )
 
 class TriMeshGL( object ):
+    'OpenGL wrapper for a TriMesh'
     kxyz = 'kxyz'
     kruv = 'kruv'
     def __init__(self, mesh, space=kxyz, colors=None, ui=None ):
@@ -70,12 +67,14 @@ class TriMeshGL( object ):
         self.ui     = ui
         self.iscut  = False
     
-    def toggleseam( self ):
+    def toggleseamcut( self ):
+        'flip cut mode'
         self.iscut = not self.iscut
 
-    def draw( self, t, worldspace=True): #slider ):
-       #t = ( slider.value - slider.min ) / ( slider.max - slider.min )
-       #t = max( t, .06)
+    def draw( self, unwrapamount, worldspace=True):
+        '''deform mesh from polar to xyz coordinates
+        unwrapamount specifies how round a shape to draw 0 is flat
+        the unwrapped mesh can be oriented to world space or object space'''
 
         otw = vecutil.vecspace2( self.ui.getpole(), self.ui.getspin() )
         wto = numpy.linalg.inv( otw )
@@ -88,18 +87,20 @@ class TriMeshGL( object ):
         if self.iscut:
             flatpoints = points.copy()
         
-        points[:,1] *= t
-        points[:,2] *= t
+        points[:, 1] *= unwrapamount
+        points[:, 2] *= unwrapamount
 
         vecutil.polar2xyz( points )
 
-        points[:,1] /= t
-        points[:,2] /= t
+        points[:, 1] /= unwrapamount
+        points[:, 2] /= unwrapamount
 
         if worldspace:
             points = vecutil.pointmatrixmult( points, otw )
 
-        if self.iscut:
+        if not self.iscut:
+            self.drawnvc( points, points, self.colors, self.mesh.indicies)
+        else:
             edgelengths = self.mesh.edgelengths(flatpoints)
        
             longedges =  edgelengths < math.pi * .5
@@ -108,46 +109,45 @@ class TriMeshGL( object ):
 
             idxs = self.mesh.indicies[erase]
             points = points[idxs]
-            vptr = vecutil.numpy2pointer(points)
-            cptr = vecutil.numpy2pointer(self.colors[idxs])
-        
+            colors = self.colors[idxs]
+
             n = len(points)*3
-
             idxs = numpy.cast[constants.INTDTYPE](numpy.mgrid[0:n] )
-            iptr = vecutil.numpy2pointer(idxs)
-        else:
-            idxs = self.mesh.indicies
-            vptr = vecutil.numpy2pointer(points)
-            cptr = vecutil.numpy2pointer(self.colors)
+
+            self.drawnvc( points, points, colors, idxs)
+
+    def drawnvc( self, normals, points, colors, idxs  ):
+        '''draw tri mesh using glDrawElements
+        using input normals points colors and indexes'''
+        n = 1
+        for dim in idxs.shape:
+            n *= dim
+
+        iptr = vecutil.numpy2pointer(idxs)
+        nptr = vecutil.numpy2pointer(normals)
+        vptr = vecutil.numpy2pointer(points)
+        cptr = vecutil.numpy2pointer(colors)
+
+        mode = self.ui.fillmodes[self.ui.fillmode]
+
+        gl.glPolygonMode( gl.GL_FRONT, mode )
         
-            n = len(idxs)*3
+        gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+        gl.glEnableClientState(gl.GL_NORMAL_ARRAY)
+        gl.glEnableClientState(gl.GL_COLOR_ARRAY)
+        gl.glVertexPointer(3, gl.GL_FLOAT, 0, vptr)
+        gl.glNormalPointer( gl.GL_FLOAT, 0, nptr)
+        gl.glColorPointer(3, gl.GL_FLOAT, 0, cptr)
+        gl.glDrawElements(gl.gl.GL_TRIANGLES, n, gl.GL_UNSIGNED_INT, iptr)
 
-            iptr = vecutil.numpy2pointer(idxs)
+        gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
+        gl.glDisableClientState(gl.GL_NORMAL_ARRAY)
+        gl.glDisableClientState(gl.GL_COLOR_ARRAY)
 
-        self.drawVNC( vptr, vptr, cptr, iptr, n )
-
-    def drawVNC( self, vptr, nptr, cptr, iptr, n ):
-        mode = self.ui.fillModes[self.ui.fillMode]
-
-        gl.glPolygonMode( GL_FRONT, mode )
-        
-        gl.glEnable( GL_NORMALIZE )
-
-        gl.glEnableClientState(GL_VERTEX_ARRAY)
-        gl.glEnableClientState(GL_NORMAL_ARRAY)
-        gl.glEnableClientState(GL_COLOR_ARRAY)
-        gl.glVertexPointer(3, GL_FLOAT, 0, vptr)
-        gl.glNormalPointer( GL_FLOAT, 0, nptr)
-        gl.glColorPointer(3, GL_FLOAT, 0, cptr)
-        gl.glDrawElements(gl.GL_TRIANGLES, n, GL_UNSIGNED_INT, iptr)
-
-        gl.glDisableClientState(GL_VERTEX_ARRAY)
-        gl.glDisableClientState(GL_NORMAL_ARRAY)
-        gl.glDisableClientState(GL_COLOR_ARRAY)
-
-        gl.glPolygonMode( GL_FRONT, gl.GL_FILL )
+        gl.glPolygonMode( gl.GL_FRONT, gl.GL_FILL )
 
 class ViewerWindow(pyglet.window.Window):
+    'viewer window handles all ui events and most drawing'
     PADDING = 4
     BUTTON_HEIGHT = 16
     BUTTON_WIDTH  = 45
@@ -160,10 +160,16 @@ class ViewerWindow(pyglet.window.Window):
     kpolemanip = 'kpolemanip'
     kspinmanip = 'kspinmanip'
 
-    def __init__(self, player):
-        config = Config(sample_buffers=1, samples=4,
-                    depth_size=24, double_buffer=True,
-                    red_size=8, blue_size=8, green_size=8, alpha_size=8 )
+    def __init__(self ):
+        'init gl context ui elements, calls setup to be a gl mesh to draw'
+        config = pyglet.gl.Config(sample_buffers=1,
+                                  samples=4,
+                                  depth_size=24,
+                                  double_buffer=True,
+                                  red_size=8,
+                                  blue_size=8,
+                                  green_size=8,
+                                  alpha_size=8 )
         try:
             pyglet.window.Window.__init__(self, caption='seam',
                                                visible=False, 
@@ -174,53 +180,55 @@ class ViewerWindow(pyglet.window.Window):
                                                visible=False, 
                                                resizable=True)
 
-        self.solverKindButton = controls.TextButton(self)
-        self.solverKindButton.on_press = self.togglesolverkind
+        self.solverkindbutton = controls.TextButton(self)
+        self.solverkindbutton.on_press = self.togglesolverkind
 
-        self.squishScaleSlider = controls.Slider(self)
-        self.squishScaleSlider.value = .1
-        self.squishScaleSlider.min = 0
-        self.squishScaleSlider.max = 1
-        self.squishScaleSlider.on_change = self.squishscalescroll
+        self.squishscaleslider = controls.Slider(self)
+        self.squishscaleslider.value = .1
+        self.squishscaleslider.min = 0
+        self.squishscaleslider.max = 1
+        self.squishscaleslider.on_change = self.squishscalescroll
 
-        self.seedSlider = controls.Slider(self)
-        self.seedSlider.value = 0
-        self.seedSlider.min = 0
-        self.seedSlider.max = 10000
-        self.seedSlider.on_change = self.seedscroll
+        self.seedslider = controls.Slider(self)
+        self.seedslider.value = 0
+        self.seedslider.min = 0
+        self.seedslider.max = 10000
+        self.seedslider.on_change = self.seedscroll
 
-        self.unwrapSlider = controls.Slider(self)
-        self.unwrapSlider.value = 100
-        self.unwrapSlider.min = 0
-        self.unwrapSlider.max = 100
-        self.unwrapSlider.on_change = self.scroll
+        self.unwrapslider = controls.Slider(self)
+        self.unwrapslider.value = 100
+        self.unwrapslider.min = 0
+        self.unwrapslider.max = 100
+        self.unwrapslider.on_change = self.scroll
 
-        self.fillModeButton = controls.TextButton(self)
-        self.fillModeButton.on_press = self.toggleFillMode
+        self.fillemodebutton = controls.TextButton(self)
+        self.fillemodebutton.on_press = self.togglefillmode
 
-        self.showAxisButton = controls.TextButton(self)
-        self.showAxisButton.on_press = self.toggleAxis
+        self.showaxisbutton = controls.TextButton(self)
+        self.showaxisbutton.on_press = self.toggleaxis
 
-        self.cutSeamButton = controls.TextButton(self)
-        self.cutSeamButton.on_press = self.toggleSeam
-        self.cutSeamButton.text = 'cut'
+        self.cutseambutton = controls.TextButton(self)
+        self.cutseambutton.on_press = self.toggleseam
+        self.cutseambutton.text = 'cut'
 
-        self.runButton = controls.TextButton(self)
-        self.runButton.on_press = self.run
-        self.runButton.text = 'run'
+        self.runbutton = controls.TextButton(self)
+        self.runbutton.on_press = self.run
+        self.runbutton.text = 'run'
+
+       #self.fps_display = pyglet.clock.ClockDisplay()
 
         self.controls = [
-            self.unwrapSlider 
-           ,self.fillModeButton
-           ,self.showAxisButton
-           ,self.cutSeamButton
-           ,self.seedSlider
-           ,self.squishScaleSlider
-           ,self.runButton
-           ,self.solverKindButton
+            self.unwrapslider 
+           ,self.fillemodebutton
+           ,self.showaxisbutton
+           ,self.cutseambutton
+           ,self.seedslider
+           ,self.squishscaleslider
+           ,self.runbutton
+           ,self.solverkindbutton
         ]
         
-        for i,control in enumerate(self.controls):
+        for i, control in enumerate(self.controls):
             control.width  = self.BUTTON_WIDTH
             control.height = self.BUTTON_HEIGHT
             control.x = self.PADDING
@@ -234,14 +242,14 @@ class ViewerWindow(pyglet.window.Window):
 
         self.mousescreen = vecutil.vec3()
         self.mouseworld  = vecutil.vec3()
-        self.pole        = vecutil.vec3(0,0,1)
+        self.pole        = vecutil.vec3(0, 0, 1)
         self.manippole   = None
-        self.spin        = vecutil.vec3(-1,0,0)
+        self.spin        = vecutil.vec3(-1, 0, 0)
         self.manipspin   = None
 
         self.mesh        = None
         self.solver      = None
-        self.solverDirty = True
+        self.solverdirty = True
 
         self.view = Frustum().rtnf(( 1, 1, -5, 5 )).orthographic()
         self.view.ctw = vecutil.mat4()
@@ -255,32 +263,35 @@ class ViewerWindow(pyglet.window.Window):
         self.zup.ry = math.radians( -90 )
         self.zup.rx = math.radians( -90 )
 
-        self.solverKind = 0
-        self.solverKinds = ( SeamSolver.kzup, SeamSolver.kplane, SeamSolver.kfree )
-        self.solverKindNames = ( 'zup', 'plane', 'free' )
-        self.solverKindButton.text = self.solverKindNames[self.solverKind]
+        self.solverkind = 0
+        self.solverkinds = SeamSolver.kzup, SeamSolver.kplane, SeamSolver.kfree
+        self.solverkindnames = 'zup', 'plane', 'free'
+        self.solverkindbutton.text = self.solverkindnames[self.solverkind]
 
-        self.fillMode = 1
-        self.fillModes = ( gl.GL_LINE, gl.GL_FILL, gl.GL_POINT)
-        self.fillModeNames = ( 'lines', 'solid', 'pnts' )
-        self.fillModeButton.text = self.fillModeNames[self.fillMode]
+        self.fillmode = 1
+        self.fillmodes = gl.GL_LINE, gl.GL_FILL, gl.GL_POINT
+        self.fillmodenames = 'lines', 'solid', 'pnts' 
+        self.fillemodebutton.text = self.fillmodenames[self.fillmode]
 
-        self.showAxis = True
-        self.showAxisNames = ('!xyz','xyz')
-        self.showAxisButton.text = self.showAxisNames[ self.showAxis ]
+        self.showaxis = True
+        self.showaxisnames = '!xyz','xyz'
+        self.showaxisbutton.text = self.showaxisnames[ self.showaxis ]
 
         self.setup()
-       #self.run() 
 
     def setup(self):
-        if self.solverDirty:
-            print('setting up')
+        '''called from event loop, will regen a solver whenever dirty
+        the number and extent of frustums is not currently set from ui
+        creates random views distributed in a possibly squished sphere
+        sets up the solver to find the best seam for the random views
+        '''
+        if self.solverdirty:
             levels       = 5
             nfrustums    = 25
             frustumscale = .4
-            squishscale  = self.squishScaleSlider.value
-            solver_kind  = self.solverKinds[self.solverKind]
-            seed         = self.seedSlider.value
+            squishscale  = self.squishscaleslider.value
+            solver_kind  = self.solverkinds[self.solverkind]
+            seed         = self.seedslider.value
 
             if not self.solver or ( self.solver.levels != levels or \
                                  self.solver.kind != solver_kind ):
@@ -317,7 +328,7 @@ class ViewerWindow(pyglet.window.Window):
 
             self.mesh = TriMeshGL( self.solver.mesh, colors=colors, ui=self )
 
-            self.solverDirty = False
+            self.solverdirty = False
 
     def run(self):
         '''computes frustum/mesh intersection and other stuff
@@ -326,51 +337,58 @@ class ViewerWindow(pyglet.window.Window):
 
         if seams:
             dummy, vis, f = seams[0]
-            self.pole = f.ctw[2,0:3]
-            self.spin = -1 * f.ctw[0,0:3]
+            self.pole = f.ctw[2, 0:3]
+            self.spin = -1 * f.ctw[0, 0:3]
             
             self.mesh.colors[vis] = 1, 1, 0
 
     def getpole(self):
+        'gets current pole vector: may be during a mouse drag'
         if self.manippole is not None:
             return self.manippole
         return self.pole
 
     def getspin(self):
+        'gets current spin vector: may be during a mouse drag'
         if self.manipspin is not None:
             return self.manipspin
         return self.spin
 
     def pixel2screen(self, x, y, z=0.0):
+        'transforms pixel coordinates to normalized device coords'
         sx = x / float(self._width)
         sy = y / float(self._height)
         sy = 1.0 - sy
 
-        xrange = self.view.right - self.view.left; 
-        yrange = self.view.bottom -  self.view.top;
-        xmin = self.view.left; 
-        ymin = self.view.top; 
+        rangex = self.view.right - self.view.left
+        rangey = self.view.bottom -  self.view.top
+        xmin = self.view.left
+        ymin = self.view.top
         
-        cx = (sx*xrange)+xmin;
-        cy = (sy*yrange)+ymin;
+        cx = (sx*rangex)+xmin
+        cy = (sy*rangey)+ymin
 
-        return vecutil.vec3(cx,cy,z)
+        return vecutil.vec3(cx, cy, z)
 
     def pixel2world_yup(self, x, y, z=0.0):
+        'pixel projected to world space without swapping y/z'
         screenpos = self.pixel2screen( x, y, z)
         return vecutil.pointmatrixmult( screenpos, self.viewtransform.wto )[0]
 
     def pixel2world_zup(self, x, y, z=0.0):
+        'pixel projected to world space with swapping y/z'
         screenpos = self.pixel2screen( x, y, z)
         yuppos = vecutil.pointmatrixmult( screenpos, self.viewtransform.wto )[0]
         return   vecutil.pointmatrixmult( yuppos, self.zup.wto )[0]
 
     def world2screen_zup(self, pt ):
+        'transform world coordinate to screen space'
         yup    = vecutil.pointmatrixmult( pt, self.zup.otw  )[0]
         camera = vecutil.pointmatrixmult( yup, self.viewtransform.otw  )[0]
         return   vecutil.pointmatrixmult( camera, self.view.cts  )[0]
 
     def on_mouse_press(self, x, y, button, modifiers):
+        'hit test controls, possibly start direct manip'
 
         controlfound = False
         for control in self.controls:
@@ -380,7 +398,7 @@ class ViewerWindow(pyglet.window.Window):
         
         if not controlfound:
 
-            self.manipstart    = vecutil.vec3(x,y)
+            self.manipstart    = vecutil.vec3(x, y)
             self.mousescreen   = self.pixel2screen(x, y)
             self.mouseworld    = self.pixel2world_yup( x, y)
             self.manippole     = self.pole.copy()
@@ -395,8 +413,8 @@ class ViewerWindow(pyglet.window.Window):
             polescreen[2] = 0
             spinscreen[2] = 0
            
-            orbit = bool( modifiers & key.MOD_ALT )
-            zoom  = bool( modifiers & key.MOD_SHIFT )
+            orbit = bool( modifiers & pyglet.window.key.MOD_ALT )
+            zoom  = bool( modifiers & pyglet.window.key.MOD_SHIFT )
 
             poledist  =  vecutil.vlength( polescreen - self.mousescreen )
             pole      =  poledist < .02
@@ -407,28 +425,25 @@ class ViewerWindow(pyglet.window.Window):
             states = [ orbit, zoom, pole, spin ]
             states += [ not any(states) ]
 
-            states = zip( states, (self.korbit, self.kzoom, self.kpolemanip, self.kspinmanip, self.kpan) )
+            states = zip( states, (self.korbit
+                                  ,self.kzoom
+                                  ,self.kpolemanip
+                                  ,self.kspinmanip
+                                  ,self.kpan ))
             for value, state in states:
                 if value:
                     self.manipstate = state
                     return
-
-
         else:
             self.manipstart = None
 
-
-    def on_key_press(self, symbol, modifiers):
-        if symbol == key.SPACE:
-            print('space test')
-        elif symbol == key.ESCAPE:
-            self.dispatch_event('on_close')
-
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        'orbit, zoom or pan view'
 
-        if self.manipstart is None: return
+        if self.manipstart is None:
+            return
 
-        current = vecutil.vec3(x,y)
+        current = vecutil.vec3(x, y)
         delta = current - self.manipstart
 
         self.manipviewtransform = Transform(self.viewtransform)
@@ -440,10 +455,15 @@ class ViewerWindow(pyglet.window.Window):
         elif self.manipstate == self.kzoom:
             current = self.pixel2screen(x, y)
         
-            zoom = vecutil.vlength( current ) /  vecutil.vlength( self.mousescreen )
-            self.manipviewtransform.sx = max( zoom * self.manipviewtransform.sx, .00001)
-            self.manipviewtransform.sy = max( zoom * self.manipviewtransform.sy, .00001)
-            self.manipviewtransform.sz = max( zoom * self.manipviewtransform.sz, .00001)
+            zoom = vecutil.vlength(current) / vecutil.vlength(self.mousescreen)
+           
+            eps =  .00001
+            self.manipviewtransform.sx *= zoom
+            self.manipviewtransform.sy *= zoom
+            self.manipviewtransform.sz *= zoom
+            self.manipviewtransform.sx = max( self.manipviewtransform.sx, eps)
+            self.manipviewtransform.sy = max( self.manipviewtransform.sy, eps)
+            self.manipviewtransform.sz = max( self.manipviewtransform.sz, eps)
     
         elif self.manipstate == self.kpan:
             delta = self.pixel2world_yup( x, y ) - self.mouseworld
@@ -455,18 +475,22 @@ class ViewerWindow(pyglet.window.Window):
             p0 = self.pixel2world_zup( x, y, 10 )
             p1 = self.pixel2world_zup( x, y, -10 )
 
-            hits = vecutil.sphere_line_intersection( p0, p1, vecutil.vec3(), 1.0 )
+            hits = vecutil.sphere_line_intersection( p0, 
+                                                     p1, 
+                                                     vecutil.vec3(), 
+                                                     1.0 )
             hit = hits[-1]
             if hit is None:
                 hit = hits[0]
             if hit is not None:
                 if self.manipstate == self.kpolemanip:
-                    self.manippole = vecutil.vec3( *hit )
+                    self.manippole = vecutil.vec3( hit[0], hit[1], hit[2] )
             
                 elif self.manipstate == self.kspinmanip:
-                    self.manipspin = vecutil.vec3( *hit )
+                    self.manipspin = vecutil.vec3( hit[0], hit[1], hit[2] )
 
     def on_mouse_release(self, x, y, button, modifiers):
+        'commits any manipulations and runs setup to update solver'
         if self.manipviewtransform:
             self.viewtransform = self.manipviewtransform
 
@@ -482,49 +506,65 @@ class ViewerWindow(pyglet.window.Window):
 
         self.setup()
 
+    def on_key_press(self, symbol, modifiers):
+        'escape closes window -- any hotkeys would go here'
+        if symbol == pyglet.window.key.SPACE:
+            pass
+        elif symbol == pyglet.window.key.ESCAPE:
+            self.dispatch_event('on_close')
+
     def scroll( self, value ):
-        self.unwrapSlider.value = value
+        'unwrap slider callback'
+        self.unwrapslider.value = value
 
     def seedscroll( self, value ):
-        self.seedSlider.value = value
-        self.solverDirty = True
+        'seed slider callback'
+        self.seedslider.value = value
+        self.solverdirty = True
 
     def squishscalescroll( self, value ):
-        self.squishScaleSlider.value = value
-        self.solverDirty = True
+        'squish slider callback'
+        self.squishscaleslider.value = value
+        self.solverdirty = True
 
     def togglesolverkind(self):
-        self.solverKind = ( self.solverKind + 1 ) % len( self.solverKinds )
-        self.solverKindButton.text = self.solverKindNames[self.solverKind]
-        self.solverDirty = True
+        'toggle through zup plane and free solver modes'
+        self.solverkind = ( self.solverkind + 1 ) % len( self.solverkinds )
+        self.solverkindbutton.text = self.solverkindnames[self.solverkind]
+        self.solverdirty = True
 
-    def toggleFillMode(self):
-        self.fillMode = ( self.fillMode + 1 ) % len( self.fillModes ) 
-        self.fillModeButton.text = self.fillModeNames[self.fillMode]
+    def togglefillmode(self):
+        'toggle through wireframe point and solid poly fill modes'
+        self.fillmode = ( self.fillmode + 1 ) % len( self.fillmodes ) 
+        self.fillemodebutton.text = self.fillmodenames[self.fillmode]
 
-    def toggleAxis(self):
-        self.showAxis = not self.showAxis
-        self.showAxisButton.text = self.showAxisNames[self.showAxis]
+    def toggleaxis(self):
+        'show x y z axis in view'
+        self.showaxis = not self.showaxis
+        self.showaxisbutton.text = self.showaxisnames[self.showaxis]
 
-    def toggleSeam(self):
-        self.mesh.toggleseam()
+    def toggleseam(self):
+        'toggle seam cutting for each mesh draw'
+        self.mesh.toggleseamcut()
 
     def drawlines( self, verts, colors, idxs ):
+        'helper to draw lines from numpy arrays of verts/colors/indexes'
         vptr = vecutil.numpy2pointer(verts)
         iptr = vecutil.numpy2pointer(idxs)
 
         if colors is not None:
             cptr = vecutil.numpy2pointer(colors)
-            gl.glEnableClientState(GL_COLOR_ARRAY)
-            gl.glColorPointer(3, GL_FLOAT, 0, cptr)
+            gl.glEnableClientState(gl.GL_COLOR_ARRAY)
+            gl.glColorPointer(3, gl.GL_FLOAT, 0, cptr)
 
-        gl.glEnableClientState(GL_VERTEX_ARRAY)
-        gl.glVertexPointer(3, GL_FLOAT, 0, vptr)
-        gl.glDrawElements(GL_LINES, len(idxs), GL_UNSIGNED_INT, iptr)
-        gl.glDisableClientState(GL_VERTEX_ARRAY)
-        gl.glDisableClientState(GL_COLOR_ARRAY)
+        gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+        gl.glVertexPointer(3, gl.GL_FLOAT, 0, vptr)
+        gl.glDrawElements(gl.GL_LINES, len(idxs), gl.GL_UNSIGNED_INT, iptr)
+        gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
+        gl.glDisableClientState(gl.GL_COLOR_ARRAY)
 
     def draw_axes(self):
+        'draw x y z axis in r g b with text labels'
         gl.glPushMatrix()
         gl.glScalef( 1.1, 1.1, 1.1)
 
@@ -540,13 +580,14 @@ class ViewerWindow(pyglet.window.Window):
         self.drawlines( verts, colors, idxs)
 
         def draw_axis_label( name, xyz):
+            'draw a single label'
             gl.glPushMatrix()
-            gl.glTranslatef( *xyz )
+            gl.glTranslatef( xyz[0], xyz[1], xyz[2] )
             gl.glScalef( .01, .01, .01 )
             gl.glRotatef( 90, 0, 1, 0 )
             gl.glRotatef( 90, 0, 0, 1 )
             pyglet.text.Label(name).draw()
-            glPopMatrix()
+            gl.glPopMatrix()
 
         draw_axis_label( 'x', x)
         draw_axis_label( 'y', y)
@@ -555,23 +596,25 @@ class ViewerWindow(pyglet.window.Window):
 
 
     def drawseam( self ):
+        'draw manip and dotted line for the seam'
         pole = self.getpole()
         spin = self.getspin()
 
         def drawpoint( pt ):
-            glPointSize( 6 )
-            gl.glBegin( GL_POINTS )
+            'draw a single point with white outline and black interior'
+            gl.glPointSize( 6 )
+            gl.glBegin( gl.GL_POINTS )
             gl.glColor3f( 1, 1, 1)
-            gl.glVertex3d( *pt )
+            gl.glVertex3d( pt[0], pt[1], pt[2] )
             gl.glEnd()
 
-            glPointSize( 4 )
-            gl.glBegin( GL_POINTS )
+            gl.glPointSize( 4 )
+            gl.glBegin( gl.GL_POINTS )
             gl.glColor3f( 0, 0, 0)
-            gl.glVertex3d( *pt )
+            gl.glVertex3d( pt[0], pt[1], pt[2] )
             gl.glEnd()
 
-            glPointSize( 3 )
+            gl.glPointSize( 3 )
 
         drawpoint( pole )       
         drawpoint( spin )       
@@ -583,14 +626,14 @@ class ViewerWindow(pyglet.window.Window):
         hcircle -= .5
         hcircle *= math.pi
 
-        circlepts = numpy.zeros( (n,3), dtype = constants.DTYPE)
-        circlepts[:,0] = -numpy.cos( hcircle )
-        circlepts[:,2] =  numpy.sin( hcircle )
+        circlepts = numpy.zeros( (n, 3), dtype = constants.DTYPE)
+        circlepts[:, 0] = -numpy.cos( hcircle )
+        circlepts[:, 2] =  numpy.sin( hcircle )
         
         gl.glPushMatrix()
 
         polemx = vecutil.vecspace2( pole, spin )
-        glMultMatrix( polemx )
+        glmultmatrix( polemx )
 
         gl.glColor3f( 1, 1, 0)
         self.drawlines( circlepts, None, idxs )
@@ -600,6 +643,7 @@ class ViewerWindow(pyglet.window.Window):
    
  
     def on_draw(self):
+        'draw all controls, manips and meshes'
         gl.glClearColor( .2, .2, .2, 0.)
         self.clear()
 
@@ -617,9 +661,9 @@ class ViewerWindow(pyglet.window.Window):
                    ,self.view.far)
 
         gl.glMatrixMode(gl.GL_MODELVIEW )
-        gl.glHint( GL_LINE_SMOOTH_HINT, GL_NICEST )
+        gl.glHint( gl.GL_LINE_SMOOTH_HINT, gl.GL_NICEST )
 
-        gl.glEnable(GL_CULL_FACE)
+        gl.glEnable(gl.GL_CULL_FACE)
 
         gl.glPushMatrix()
 
@@ -628,16 +672,16 @@ class ViewerWindow(pyglet.window.Window):
             xform = self.manipviewtransform
 
         gl.glLoadIdentity()
-        xform.glMultMatrix()
+        xform.glmultmatrix()
 
-        self.zup.glMultMatrix()
+        self.zup.glmultmatrix()
      
-        slider = self.unwrapSlider
+        slider = self.unwrapslider
         t = ( slider.value - slider.min ) / ( slider.max - slider.min )
         t = max( t, .06)
         self.mesh.draw( t )
 
-        if self.showAxis:
+        if self.showaxis:
             self.draw_axes()
 
         self.drawseam()
@@ -645,7 +689,6 @@ class ViewerWindow(pyglet.window.Window):
         gl.glPopMatrix()
 
         gl.glLoadIdentity()
-
     
         gl.glPushMatrix()
         gl.glTranslatef( -1, aspect, 0)
@@ -653,7 +696,7 @@ class ViewerWindow(pyglet.window.Window):
         gl.glTranslatef( 1.0, -.5, 0)
         gl.glScalef( 1.0/math.pi, 1.0/math.pi, 1)
         
-        self.zup.glMultMatrix()
+        self.zup.glmultmatrix()
         self.mesh.draw( 0.06, False )
         gl.glPopMatrix()
 
@@ -665,17 +708,19 @@ class ViewerWindow(pyglet.window.Window):
         for control in self.controls:
             control.draw()
 
+       #gl.glTranslatef( self._width - 200, self._height - 50, 0 )
+       #self.fps_display.draw()
+
         gl.glLoadIdentity()
 
     def on_resize(self, width, height):
+        'keep track of width and hight, let pyglet do the rest of the work'
         self._width = width
         self._height = height
         return pyglet.window.Window.on_resize(self, width, height)
 
 if __name__ == '__main__':
-    window = ViewerWindow(None)
-    window.set_visible(True)
-
-    pyglet.clock.schedule_interval(lambda dt: None, 0.2)
+    WINDOW = ViewerWindow()
+    WINDOW.set_visible(True)
 
     pyglet.app.run()
