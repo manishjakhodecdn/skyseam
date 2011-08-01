@@ -244,6 +244,11 @@ class ViewerWindow(pyglet.window.Window):
 
         self.manipstart = None
         self.viewtransform = TransformGL()
+        self.viewtransform.sx = .5
+        self.viewtransform.sy = .5
+        self.viewtransform.sz = .5
+        self.viewtransform.tx = .8
+        self.viewtransform.ty = -.2
         self.manipviewtransform = None
 
         self.mousescreen = vecutil.vec3()
@@ -279,7 +284,7 @@ class ViewerWindow(pyglet.window.Window):
         self.fillmodenames = 'lines', 'solid', 'pnts' 
         self.fillemodebutton.text = self.fillmodenames[self.fillmode]
 
-        self.showaxis = True
+        self.showaxis = False
         self.showaxisnames = '!xyz','xyz'
         self.showaxisbutton.text = self.showaxisnames[ self.showaxis ]
 
@@ -328,9 +333,13 @@ class ViewerWindow(pyglet.window.Window):
 
             self.solver.markfrustums(frustums)
 
-            colors = self.solver.mesh.points.copy()
-            colors[:, 0] = 1-self.solver.vertweight
-            colors[:, 1] = self.solver.vertvis
+            colors = numpy.zeros( self.solver.mesh.points.shape, constants.DTYPE )
+            colors[:, 0] = 1 - self.solver.vertweight
+            colors[:, 1] = colors[:, 0]
+            colors[:, 2] = colors[:, 0]
+#           colors += .1
+#           colors[:, 1] = 0
+            colors[self.solver.vertvis] = 0.1
 
             self.mesh = TriMeshGL( self.solver.mesh, colors=colors, ui=self )
 
@@ -346,7 +355,7 @@ class ViewerWindow(pyglet.window.Window):
             self.pole = f.ctw[2, 0:3]
             self.spin = -1 * f.ctw[0, 0:3]
             
-            self.mesh.colors[vis] = 1, 1, 0
+           #self.mesh.colors[vis] = 1, 1, 0
 
     def getpole(self):
         'gets current pole vector: may be during a mouse drag'
@@ -509,7 +518,7 @@ class ViewerWindow(pyglet.window.Window):
         self.manipviewtransform = None
         self.manippole = None
         self.manipspin = None
-
+    
         self.setup()
 
     def on_key_press(self, symbol, modifiers):
@@ -622,8 +631,6 @@ class ViewerWindow(pyglet.window.Window):
 
             gl.glPointSize( 3 )
 
-        drawpoint( pole )       
-        drawpoint( spin )       
 
         n = 60
         idxs    = numpy.cast[constants.INTDTYPE]( numpy.mgrid[:n] )
@@ -641,12 +648,19 @@ class ViewerWindow(pyglet.window.Window):
         polemx = vecutil.vecspace2( pole, spin )
         glmultmatrix( polemx )
 
+        gl.glLineWidth( 5 )
+        gl.glColor3f( 0, 0, 0)
+        self.drawlines( circlepts, None, idxs )
+
+        gl.glLineWidth( 1 )
         gl.glColor3f( 1, 1, 0)
         self.drawlines( circlepts, None, idxs )
 
         gl.glPopMatrix()
         gl.glColor3f( 1, 1, 1)
    
+        drawpoint( pole )       
+        drawpoint( spin )       
  
     def on_draw(self):
         'draw all controls, manips and meshes'
@@ -711,6 +725,7 @@ class ViewerWindow(pyglet.window.Window):
         gl.glOrtho(0, self._width, 0, self._height, -1, 1)
         gl.glMatrixMode(gl.GL_MODELVIEW)
         
+        gl.glColor3f( 1, 1, 1)
         for control in self.controls:
             control.draw()
 

@@ -323,8 +323,25 @@ class Frustum(object):
 
     def copy(self):
         'use deepcopy to copy all numpy and scalar members'
-        from copy import deepcopy
-        return deepcopy(self)
+        def copyhelper( val ):
+            'copy numpy array if possible'
+            if val is None: return None
+            return val.copy()
+        f = Frustum()
+        f._wts    = copyhelper( self._wts )
+        f._stw    = copyhelper( self._stw )
+        f._cts    = copyhelper( self._cts )
+        f._stc    = copyhelper( self._stc )
+        f._wtc    = copyhelper( self._wtc )
+        f._ctw    = copyhelper( self._ctw )
+        f._left   = self._left   
+        f._right  = self._right  
+        f._top    = self._top    
+        f._bottom = self._bottom 
+        f._near   = self._near   
+        f._far    = self._far    
+        f._kind   = self._kind
+        return f
 
 if __name__ == '__main__':
     def _frustumtest():
@@ -340,8 +357,7 @@ if __name__ == '__main__':
         nf = Frustum().lrtbnf((.1, -.05, .2, -.15,  1, 2)).perspective()
         print(nf)
 
-        from copy import deepcopy
-        of = deepcopy(nf)
+        of = nf.copy()
         nf.wtc = numpy.identity(4)
         of.wtc = nf.wtc * 5
         print(of)

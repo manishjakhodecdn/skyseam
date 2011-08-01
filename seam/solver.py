@@ -392,8 +392,8 @@ class SeamSolver( object ):
 if __name__ == '__main__':
 
     def dump2gl( meshlist ):
-        'save a mesh to a tmp obj file and view'
-        import subprocess
+        'save a list of meshes'
+        print('saving result meshes:')
         args = []
         for mesh in meshlist:
             tmp = '/var/tmp/%s.obj' % (mesh.name)
@@ -401,8 +401,7 @@ if __name__ == '__main__':
                 mesh.uvzeros()
             mesh.writeobj(tmp)
             args.append(tmp)
-        gltest = '/Users/aharvill/Public/lib/mesh/build/Release/GLTest'
-        subprocess.Popen([gltest] + args )
+            print tmp
 
     def seedarg():
         'get an integer seed command line argument'
@@ -492,10 +491,11 @@ if __name__ == '__main__':
             solver.mesh.uvs[vis] = 1, 1 
         else:
             print('no seams found')
-        dump2gl(meshlist)
+   
+       #dump2gl(meshlist)
 
     def testcells():
-        ''' give grid cells random colors for debuggin'''
+        ''' give grid cells random colors for debugging'''
         solver = SeamSolver()
 
         cells, ncells = solver.mesh.cells( 3 )

@@ -407,8 +407,18 @@ class TriMesh(object):
 
     def copy(self):
         'return duplicate mesh'
-        mesh = copy.deepcopy(self)
-        mesh.name += 'Copy'
+        mesh = TriMesh(  self.points
+                        ,self.indicies 
+                        ,name  = self.name+'Copy'
+                        ,group = self.group
+                        ,edges = self.edges
+                        ,uvs   = self.uvs )
+        mesh.uvs   = self.uvs   
+        mesh.v2f   = self.v2f   
+        mesh.e2f   = self.e2f   
+        mesh.f2e   = self.f2e   
+        mesh.level = self.level 
+
         return mesh
 
     def polar( self, f ):
