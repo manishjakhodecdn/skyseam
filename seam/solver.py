@@ -323,8 +323,6 @@ class SeamSolver( object ):
             tmp = mesh.vertsinfrustum( frustum.wtc, frustum.wts )
             vertvis[tmp] = True
 
-        mesh.buildrefedges()
-
         fsig = mesh.binarysignal_v2f(vertvis)
 
         ftotal = numpy.zeros(fsig.shape, dtype=DTYPE)
@@ -430,7 +428,7 @@ if __name__ == '__main__':
         'wrapper for cProfile'
         return solver.run()
 
-    def testmulti( solver_kind = SeamSolver.kfree): #kfree ): #kzup ):
+    def testmulti( solver_kind = SeamSolver.kplane): #kfree ): #kzup ):
         '''computes frustum/mesh intersection and other stuff
         build a pyramid, build frustums and find seams'''
         levels       = 5

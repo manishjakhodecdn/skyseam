@@ -35,22 +35,23 @@
 
 import numpy
 import math
-import copy
 import vecutil
-from constants import DTYPE,INTDTYPE
+from constants import DTYPE, INTDTYPE
 
 class TriMesh(object):  
     'triangle mesh with obj output and subdivision based on numpy'
     def __init__(self, points, indicies, 
-                 name = 'name', group = None, edges = None, uvs=None):
+                 name = 'name', group = None, edges = None, uvs=None, f2e=None):
         self.name  = name
         self.group = group
         self.edges = edges
         self.uvs   = uvs
         self.v2f   = None
         self.e2f   = None
-        self.f2e   = None
+        self.f2e   = f2e
         self.level = 0
+
+        self.closed = None
 
         self.shortedgelen = None
         self.avgedgelen   = None
@@ -78,7 +79,7 @@ class TriMesh(object):
         except:
             raise Warning, 'needs an array like object of int triples'
 
-        self.erase    = numpy.ones( (self.nfaces), dtype = numpy.bool)
+        self.erase = numpy.ones( (self.nfaces), dtype = numpy.bool)
 
         if self.edges == None:
             self.buildedges()
@@ -105,80 +106,9 @@ class TriMesh(object):
 
         #remove duplicate idx pairs
         t = edges.dtype
-        view = edges.view([('', t),('', t)])
+        view = edges.view([('', t), ('', t)])
         groups = numpy.sort(view, axis = 0).view(t)
         self.edges = groups[::2]
-
-    def buildrefedges(self):
-        'table of edges to faces'
-        v0 = self.indicies[:, 0]
-        v1 = self.indicies[:, 1]
-        v2 = self.indicies[:, 2]
-
-        fidxs = numpy.mgrid[0:len(v0)]
-
-        n0 = len(v0)
-        n1 = n0*2
-        n2 = n0*3
-
-        edgefacedtype = numpy.dtype([ 
-            ('e', [('i', INTDTYPE),('j', INTDTYPE)]), ('k', INTDTYPE)
-            ])
-
-        ef = numpy.recarray( (n2,), dtype = edgefacedtype)
-
-        edges = numpy.zeros( (n2, 2), dtype = INTDTYPE)
-        edges[0 :n0, 0] = v0
-        edges[0 :n0, 1] = v1
-        edges[n0:n1, 0] = v1
-        edges[n0:n1, 1] = v2
-        edges[n1:n2, 0] = v2
-        edges[n1:n2, 1] = v0
-
-            #lowest vert index first
-        edges = numpy.sort( edges, axis = 1  )
-
-        ef.e.i = edges[:, 0]                        
-        ef.e.j = edges[:, 1]                        
-
-        ef.k[0 :n0] = fidxs
-        ef.k[n0:n1] = fidxs
-        ef.k[n1:n2] = fidxs
-
-            #group records
-        efs = numpy.sort(ef)
-
-        efs = efs.view(INTDTYPE).reshape((n2, 3))
-
-            #each edge pair alternates at the end of the 3 tuple
-            #each vert pair is repeated twice at the beginning of the 3 tuple
-        f0 = efs[::2, 2]
-        f1 = efs[1::2, 2]
-        self.edges = efs[::2, :2]
-
-        self.e2f = numpy.zeros( (len(f0), 2), dtype = INTDTYPE)
-        self.e2f[:, 0] = f0
-        self.e2f[:, 1] = f1
-
-        faceedgedtype = numpy.dtype([ ('f', INTDTYPE), ('e', INTDTYPE) ])
-        fe = numpy.recarray( (n2,), dtype = faceedgedtype)
-
-        eidxs = numpy.mgrid[0:len(self.edges)]
-        fe.f = efs[:, 2]
-        fe.e[::2]  = eidxs
-        fe.e[1::2] = eidxs
-
-        fes = numpy.sort(fe)
-
-        fes = fes.view(INTDTYPE).reshape((n2, 2))
-        e0 = fes[::3, 1]
-        e1 = fes[1::3, 1]
-        e2 = fes[2::3, 1]
-
-        self.f2e = numpy.zeros( (len(e0), 3), dtype = INTDTYPE)
-        self.f2e[:, 0] = e0
-        self.f2e[:, 1] = e1
-        self.f2e[:, 2] = e2
 
     def buildvert2faces(self):
         'dictionary of verts to faces'
@@ -202,7 +132,7 @@ class TriMesh(object):
         return numpy.sqrt( x*x+y*y+z*z )
 
     def edgestats(self):
-        'return min,max,avg edge lens. compute if not already available.'
+        'return min, max, avg edge lens. compute if not already available.'
 
         if not all( (self.shortedgelen, self.avgedgelen, self.longedgelen) ):
             edgelengths = self.edgelengths()
@@ -213,7 +143,7 @@ class TriMesh(object):
         return self.shortedgelen, self.avgedgelen, self.longedgelen 
 
     def antipodes( self, idx ):
-        'TODO write doc str'
+        'finds the point reflected about the origin'
         inv = self.points[idx] * -1
         dist = numpy.abs( numpy.inner( inv, self.points) - 1 )
         return numpy.argmin( dist )
@@ -235,7 +165,7 @@ class TriMesh(object):
 
     def writeobj(self, filename ='/var/tmp/tmp.obj'):
         'write obj with uvs if available, use self.erase to delete faces'
-        fd = open(filename,'w')
+        fd = open(filename, 'w')
         numpy.savetxt( fd, self.points, delimiter =' ', fmt ='v %g %g %g')
         if self.uvs != None:
             numpy.savetxt( fd, self.uvs, delimiter =' ', fmt ='vt %g %g')
@@ -269,6 +199,83 @@ class TriMesh(object):
         self.points[:, 1] *= scale
         self.points[:, 2] *= scale
 
+    def edgehash( self, edges ):
+        'ravel vert idxs together to create a unique int per edge'
+        maxidx = len( self.points )
+        edges = numpy.sort( edges, axis=1)
+        edgehash = edges[:, 0] * maxidx + edges[:, 1]
+        return edgehash
+
+    def f2eslow( self ):
+        '''straightforward method to build the face to edge table
+        a dictionary maps 2 points that form an edge to an edge index
+        for each face, lookup edges from points
+        this is slow because a ton of logic is happening per face/edge'''
+        p0 = self.indicies[:, 0]
+        p1 = self.indicies[:, 1]
+        p2 = self.indicies[:, 2]
+
+        edict = {}
+        for idx, edge in enumerate(self.edges):
+            edict[tuple(edge)] = idx
+
+        self.f2e = self.indicies.copy()
+        for oi, (p0, p1, p2) in enumerate(self.indicies):
+            self.f2e[oi, 0] = edict[tuple(sorted((p0, p1)))]
+            self.f2e[oi, 1] = edict[tuple(sorted((p1, p2)))]
+            self.f2e[oi, 2] = edict[tuple(sorted((p2, p0)))]
+
+    def f2efast( self ):
+        '''optimized version of f2eslow
+        an intermediate hash number is calculated for each edge
+        logic now happens outside the python loops'''
+
+        try:
+            hashededges = self.edgehash( self.edges )
+
+            edgelookup = {}
+            for idx, hashededge in enumerate(hashededges):
+                edgelookup[hashededge] = idx
+       
+            p0 = self.indicies[:, 0 ]
+            p1 = self.indicies[:, 1 ]
+            p2 = self.indicies[:, 2 ]
+            e0 = numpy.vstack( (p0, p1) ).transpose()
+            e1 = numpy.vstack( (p1, p2) ).transpose()
+            e2 = numpy.vstack( (p2, p0) ).transpose()
+
+            e0 = self.edgehash(e0)
+            e1 = self.edgehash(e1)
+            e2 = self.edgehash(e2)
+    
+            f2e = numpy.zeros( self.indicies.shape, dtype=INTDTYPE )
+            for fidx in xrange( len(e0) ):
+                f2e[fidx, 0] = edgelookup[ e0[fidx] ]
+                f2e[fidx, 1] = edgelookup[ e1[fidx] ]
+                f2e[fidx, 2] = edgelookup[ e2[fidx] ]
+
+            self.f2e = f2e
+            self.closed = True
+        except KeyError:
+            self.closed = False
+
+    def e2ffast(self):
+        'compute the edge2faces table from the face2edge table'
+        if self.f2e is None:
+            self.f2efast()
+            if self.closed == False:
+                return
+
+        idxs = numpy.mgrid[0:len(self.indicies)].astype( INTDTYPE )
+        alledges = self.f2e.transpose().ravel()
+        allfaces = numpy.concatenate( (idxs, idxs, idxs) )
+
+        e2f = numpy.argsort( alledges )
+
+        e2f = allfaces[e2f] #otherwise idxs run from 0 - nfaces * 3
+ 
+        self.e2f = e2f.reshape( self.edges.shape )
+
     def subdivide( self, **kwargs):
         ''' add new points and faces like so:
 
@@ -278,35 +285,78 @@ class TriMesh(object):
           / \   / \         3   4
         p1____m1___p2       
         '''
+
+
+        if self.f2e == None:
+            self.f2efast()
+    
+        if self.closed == False:
+            raise Warning('cannot subdivide an open mesh')
+            
+
         lo = len(self.points)
         hi = lo + len(self.edges)
         pts = numpy.zeros( (hi, 3), dtype=DTYPE )
         pts[0:lo] = self.points
 
         edgepts = self.points[self.edges]
-        edict = {}
-        for idx, edge in enumerate(self.edges):
-            edict[tuple(edge)] = idx
-
         pts[lo:hi] = (edgepts[:, 0] + edgepts[:, 1])*.5
 
         nfaces = len(self.indicies)*4
-        idxs = numpy.zeros( (nfaces, 3), dtype = numpy.int64)
+        idxs = numpy.zeros( (nfaces, 3), dtype = INTDTYPE )
 
-        for oi,(p0, p1, p2) in enumerate(self.indicies):
-            m0 = edict[tuple(sorted((p0, p1)))] + lo
-            m1 = edict[tuple(sorted((p1, p2)))] + lo
-            m2 = edict[tuple(sorted((p2, p0)))] + lo
+        p0 = self.indicies[:, 0]
+        p1 = self.indicies[:, 1]
+        p2 = self.indicies[:, 2]
 
-            i = oi*4
+        m0 = self.f2e[:, 0] + lo
+        m1 = self.f2e[:, 1] + lo
+        m2 = self.f2e[:, 2] + lo
 
-            idxs[i+0] = (p0, m0, m2)
-            idxs[i+1] = (m0, m1, m2)
-            idxs[i+2] = (p1, m1, m0)
-            idxs[i+3] = (m1, p2, m2)
+        idxs[0::4, 0] = p0
+        idxs[0::4, 1] = m0
+        idxs[0::4, 2] = m2
+        idxs[1::4, 0] = m0
+        idxs[1::4, 1] = m1
+        idxs[1::4, 2] = m2
+        idxs[2::4, 0] = p1
+        idxs[2::4, 1] = m1
+        idxs[2::4, 2] = m0
+        idxs[3::4, 0] = m1
+        idxs[3::4, 1] = p2
+        idxs[3::4, 2] = m2
 
-        smesh = TriMesh(pts, idxs, **kwargs)
+            # 2 exterior edges per orig edge + 3 interior edges per face
+        outeredges = len(self.edges) * 2
+        nedges = len(self.edges) * 2 + len(self.indicies) * 3
+        edges = numpy.zeros( (nedges, 2), dtype = INTDTYPE )
+        e0 = self.edges[:, 0]
+        e1 = self.edges[:, 1]
+        en = numpy.mgrid[0:len(self.edges)] + lo
+        edges[0:outeredges:2, 0] = e0
+        edges[0:outeredges:2, 1] = en
+        edges[1:outeredges:2, 0] = en
+        edges[1:outeredges:2, 1] = e1
+
+        edges[outeredges::3, 0] = m0
+        edges[outeredges::3, 1] = m1
+        edges[outeredges+1::3, 0] = m1
+        edges[outeredges+1::3, 1] = m2
+        edges[outeredges+2::3, 0] = m2
+        edges[outeredges+2::3, 1] = m0
+
+        edgeflip = edges[:, 0] > edges[:, 1]
+   
+        tmp = edges[ edgeflip ]
+        flip = tmp.copy()
+        tmp[:, 0] = flip[:, 1]
+        tmp[:, 1] = flip[:, 0]
+        edges[ edgeflip ] = tmp
+
+        smesh = TriMesh(pts, idxs, edges=edges, **kwargs)
+
         smesh.level = self.level + 1
+
         return smesh
 
     def vertsinfrustum(self, w2c, w2s ):
@@ -336,7 +386,7 @@ class TriMesh(object):
         use combinefunc to change the compare function for edges'''
 
         if self.f2e is None:
-            self.buildrefedges()
+            self.f2efast()
 
         e0 = self.f2e[:, 0]
         e1 = self.f2e[:, 1] 
@@ -352,6 +402,9 @@ class TriMesh(object):
     def binarysignal_f2e(self, signal, combinefunc = numpy.maximum):
         '''each edge gets the signal value of one face
         use combinefunc to change the compare function for faces'''
+
+        if self.e2f is None:
+            self.e2ffast()
 
         f0 = self.e2f[:, 0]
         f1 = self.e2f[:, 1] 
@@ -499,7 +552,9 @@ class TriMesh(object):
                                 ,[0, 6, 4], [0, 2, 6]
                                 ,[1, 7, 3], [1, 5, 7]], dtype=INTDTYPE )
 
-        return TriMesh( verts, indicies)
+        c = TriMesh( verts, indicies )
+
+        return c
 
     @staticmethod
     def icosa():
@@ -533,9 +588,10 @@ class TriMesh(object):
                             ,( 7, 5, 11), ( 7, 11, 3)
                             ,( 5, 7,  0), ( 5, 0,  6)
                             ,( 1, 0,  7), ( 1, 7,  3)
-                         ), dtype=INTDTYPE)
+                           ), dtype=INTDTYPE)
 
-        return TriMesh( pts, mesh)
+        imesh = TriMesh( pts, mesh )
+        return imesh
 
     @staticmethod
     def grid(tfaces=40, pfaces=20):
@@ -567,19 +623,94 @@ class TriMesh(object):
         vu = numpy.cast[DTYPE]( numpy.mgrid[ 0:pverts, 0:tverts  ] )
 
         p = numpy.ones( (tverts*pverts, 3), dtype=DTYPE)
-        p[:,1] = numpy.ravel( vu[1] )
-        p[:,2] = numpy.ravel( vu[0] )
+        p[:, 1] = numpy.ravel( vu[1] )
+        p[:, 2] = numpy.ravel( vu[0] )
 
-        p[:,1] /= tfaces
-        p[:,2] /= pfaces
-        p[:,1] -= .5
-        p[:,2] -= .5
+        p[:, 1] /= tfaces
+        p[:, 2] /= pfaces
+        p[:, 1] -= .5
+        p[:, 2] -= .5
 
-        p[:,1] *= 2 * numpy.pi
-        p[:,2] *= numpy.pi
+        p[:, 1] *= 2 * numpy.pi
+        p[:, 2] *= numpy.pi
 
         return TriMesh( p, idxs )
 
-if __name__ == '__main__':
-    print( TriMesh.cube() )
-    print( TriMesh.icosa() )
+#if __name__ == '__main__':
+#
+#   def navgsignal_f2v( self, frand, sv2f, v2sv ):
+#       nvrand = numpy.zeros( len(self.points), dtype=DTYPE )
+#       
+#       for i,sub in enumerate(sv2f):
+#           n = v2sv[i]
+#           print(sub.shape)
+#           a = numpy.zeros( sub.shape[0], dtype=DTYPE)
+#           for j in range(sub.shape[-1]):
+#               a += frand[sub[:,j]]
+#           a  *= (1.0 / float(sub.shape[-1]) )
+#           nvrand[n] = a
+#       return nvrand
+
+#   def testsubd():
+#       c = TriMesh.icosa()
+#      #c = TriMesh.cube()
+#      #c.buildrefedges()
+#       c = c.subdivide()
+#       c = c.subdivide()
+#       c = c.subdivide()
+#       c = c.subdivide()
+#       c = c.subdivide()
+#       c = c.subdivide()
+#      #c = c.subdivide()
+#       for i in range(20):
+#           c.binarysignal_f2e( numpy.mgrid[0:len(c.indicies) ])
+#       print(c.points.shape)
+#      #c = c.subdivide()
+#      #print(c)
+
+#   def test():
+#   #    print( TriMesh.cube() )
+#   #    print( TriMesh.icosa() )
+#      #c = TriMesh.cube()
+#       c = TriMesh.icosa()
+
+#       for i in range(5):
+#           c = c.subdivide()
+#      #c = TriMesh.cube()
+#       c.buildvert2faces()
+#       maxlen = 0
+#       minlen = float('inf')
+
+#       lens = numpy.ones( (len(c.points)), dtype = INTDTYPE )
+#       for v,s in c.v2f.iteritems():
+#           lens[v] = len(s)
+
+#       maxlen = lens.max()
+#       minlen = lens.min()
+
+#       sv2f = []
+#       v2sv = []
+
+#       for i in range( minlen, maxlen+1):
+#           n = numpy.nonzero( lens == i )[0]
+#           v2sv.append( n )
+#           v2f = numpy.ones( (len(n), i), dtype = INTDTYPE )
+#           for j in xrange( len( n ) ):
+#                v2f[j] = tuple(c.v2f[n[j]])
+
+#           sv2f.append( v2f )
+
+#       frand = numpy.random.uniform( 0, 1, len(c.indicies) )
+
+#       vrand = c.avgsignal_f2v(frand)
+
+#       nvrand = navgsignal_f2v( c, frand, sv2f, v2sv )
+
+#       print(numpy.sum( nvrand - vrand) )
+#   import cProfile
+#   cProfile.run('testsubd()')
+#  #testsubd()
+#   def testedges():
+#       c = TriMesh.icosa()
+#       c.binarysignal_f2e( numpy.mgrid[0:len(c.indicies) ])
+#  #testsubd()
