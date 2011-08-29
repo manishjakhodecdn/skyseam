@@ -44,17 +44,24 @@ from frustum import Frustum
 from solver import SeamSolver
 from transform import Transform
 
-def glmultmatrix( mx ):
-    'transform the gl stream'
+def glmatrixop( mx, floatfunc, doublefunc ):
     mxptr = vecutil.numpy2pointer( mx )
     size = mx.dtype.itemsize
 
     if size not in (4, 8):
         raise Warning('matrix data must be 4 or 8 bytes')
     if size == 8:
-        pyglet.gl.glMultMatrixd( mxptr )
+        doublefunc( mxptr )
     else:
-        pyglet.gl.glMultMatrixf( mxptr )
+        floatfunc( mxptr )
+
+def glloadmatrix( mx ):
+    'set the gl stream transformation'
+    glmatrixop( mx, pyglet.gl.glLoadMatrixf, pyglet.gl.glLoadMatrixd )
+
+def glmultmatrix( mx ):
+    'transform the gl stream'
+    glmatrixop( mx, pyglet.gl.glMultMatrixf, pyglet.gl.glMultMatrixd )
 
 class TransformGL( Transform ):
     'extend Transform with glmultmatrix'
@@ -670,17 +677,18 @@ class ViewerWindow(pyglet.window.Window):
         aspect = self._height/float(self._width)
 
         gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glLoadIdentity()
         self.view.rtnf(( 1, aspect, -5, 5 )).orthographic()
 
-        gl.glOrtho( self.view.left
-                   ,self.view.right
-                   ,self.view.bottom
-                   ,self.view.top
-                   ,self.view.near
-                   ,self.view.far)
+        glloadmatrix( self.view.wts.transpose() )
 
         gl.glMatrixMode(gl.GL_MODELVIEW )
+
+       #mat_pro = (gl.GLdouble * 16)()
+       #gl.glGetDoublev(gl.GL_PROJECTION_MATRIX, mat_pro)
+       #m = numpy.array( mat_pro )
+       #m = m.reshape((4,4))
+       #print( numpy.allclose( m, self.view.wts ))
+
         gl.glHint( gl.GL_LINE_SMOOTH_HINT, gl.GL_NICEST )
 
         gl.glEnable(gl.GL_CULL_FACE)
