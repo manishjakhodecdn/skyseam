@@ -594,7 +594,7 @@ class TriMesh(object):
         return imesh
 
     @staticmethod
-    def grid(tfaces=40, pfaces=20):
+    def grid(tfaces=40, pfaces=20, int_coords=False):
         '''tri grid for spherical coordinates
         ntris = tfaces * pfaces * 2
         radius:          x == 1
@@ -625,14 +625,15 @@ class TriMesh(object):
         p = numpy.ones( (tverts*pverts, 3), dtype=DTYPE)
         p[:, 1] = numpy.ravel( vu[1] )
         p[:, 2] = numpy.ravel( vu[0] )
+ 
+        if int_coords:
+            p[:, 1] /= tfaces
+            p[:, 2] /= pfaces
+            p[:, 1] -= .5
+            p[:, 2] -= .5
 
-        p[:, 1] /= tfaces
-        p[:, 2] /= pfaces
-        p[:, 1] -= .5
-        p[:, 2] -= .5
-
-        p[:, 1] *= 2 * numpy.pi
-        p[:, 2] *= numpy.pi
+            p[:, 1] *= 2 * numpy.pi
+            p[:, 2] *= numpy.pi
 
         return TriMesh( p, idxs )
 
