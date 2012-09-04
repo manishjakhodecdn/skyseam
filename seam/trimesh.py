@@ -1,6 +1,6 @@
 # ----------------------------------------------------------------------------
 # seam
-# Copyright (c) 2011 Alex Harvill
+# Copyright (c) 2011-2012 Alex Harvill
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
@@ -34,18 +34,27 @@
 'triangle mesh with subdivision based on numpy'
 
 import numpy
-import math
 import vecutil
 from constants import DTYPE, INTDTYPE
+from fixedmesh import FixedMesh
 
-class TriMesh(object):  
+class TriMesh(FixedMesh):  
     'triangle mesh with obj output and subdivision based on numpy'
-    def __init__(self, points, indicies, 
-                 name = 'name', group = None, edges = None, uvs=None, f2e=None):
-        self.name  = name
-        self.group = group
+    clsname = 'TriMesh'
+    verts_per_face = 3
+    verts_per_face_name = 'triples'
+
+    def __init__(self,
+                 points,
+                 indicies,
+                 name   = 'None',
+                 group  = None,
+                 edges  = None,
+                 uvs    = None,
+                 colors = None,
+                 f2e    = None):
+
         self.edges = edges
-        self.uvs   = uvs
         self.v2f   = None
         self.e2f   = None
         self.f2e   = f2e
@@ -57,29 +66,12 @@ class TriMesh(object):
         self.avgedgelen   = None
         self.longedgelen  = None
 
-        try:
-            self.points = numpy.array(points).astype(DTYPE)
-            if len(self.points.shape) == 1:
-                self.size = len(points)/3
-                self.points = self.points.reshape( (self.size, 3) )
-
-            assert( self.points.shape[1] == 3 )
-            self.size = self.points.shape[0]
-        except:
-            raise Warning, 'needs an array like object of float triples'
-
-        try:
-            self.indicies = numpy.array(indicies).astype(INTDTYPE)
-            if len(self.indicies.shape) == 1:
-                self.nfaces = len(points)/3
-                self.indicies = self.indicies.reshape( (self.nfaces, 3) )
-
-            assert( self.indicies.shape[1] == 3 )
-            self.nfaces = self.indicies.shape[0]
-        except:
-            raise Warning, 'needs an array like object of int triples'
-
-        self.erase = numpy.ones( (self.nfaces), dtype = numpy.bool)
+        super(TriMesh, self).__init__( points,
+                                       indicies,
+                                       name   = name,
+                                       group  = group, 
+                                       uvs    = uvs,   
+                                       colors = colors)
 
         if self.edges == None:
             self.buildedges()
@@ -141,63 +133,6 @@ class TriMesh(object):
             self.avgedgelen   = edgelengths.sum() / float(len(self.edges))
 
         return self.shortedgelen, self.avgedgelen, self.longedgelen 
-
-    def antipodes( self, idx ):
-        'finds the point reflected about the origin'
-        inv = self.points[idx] * -1
-        dist = numpy.abs( numpy.inner( inv, self.points) - 1 )
-        return numpy.argmin( dist )
-
-    def xformresult( self, mx ):
-        'homogenious point matrix multiply, return result'
-        hpoints = numpy.ones( (len(self.points), 4), dtype=DTYPE )
-        hpoints[:, :3] = self.points
-        hpoints = numpy.dot( hpoints, mx)
-        wcoords = hpoints[:, 3]
-        hpoints[:, 0] /= wcoords
-        hpoints[:, 1] /= wcoords
-        hpoints[:, 2] /= wcoords
-        return hpoints[:, :3]
-
-    def xform( self, mx ):
-        'homogenious point matrix multiply, apply result'
-        self.points = self.xformresult(mx)
-
-    def writeobj(self, filename ='/var/tmp/tmp.obj'):
-        'write obj with uvs if available, use self.erase to delete faces'
-        fd = open(filename, 'w')
-        numpy.savetxt( fd, self.points, delimiter =' ', fmt ='v %g %g %g')
-        if self.uvs != None:
-            numpy.savetxt( fd, self.uvs, delimiter =' ', fmt ='vt %g %g')
-
-            shape = (len(self.indicies), 6)
-            vertuvspec = numpy.zeros( shape, dtype = INTDTYPE )
-            vertuvspec[:, 0] = self.indicies[:, 0]
-            vertuvspec[:, 1] = self.indicies[:, 0]
-            vertuvspec[:, 2] = self.indicies[:, 1]
-            vertuvspec[:, 3] = self.indicies[:, 1]
-            vertuvspec[:, 4] = self.indicies[:, 2]
-            vertuvspec[:, 5] = self.indicies[:, 2]
-            numpy.savetxt( fd, 
-                           vertuvspec[numpy.nonzero(self.erase)] + 1,
-                           delimiter =' ',
-                           fmt ='f %g/%g %g/%g %g/%g')
-        else:
-            numpy.savetxt( fd, 
-                           self.indicies[numpy.nonzero(self.erase)] + 1,
-                           delimiter =' ',
-                           fmt ='f %g %g %g')
-        fd.close()
-
-    def normalizepoints( self ):
-        'make all points unit length -- spherize'
-        x = self.points[:, 0]
-        y = self.points[:, 1]
-        z = self.points[:, 2]
-        scale = 1.0 / numpy.sqrt(x*x+y*y+z*z)
-        self.points[:, 0] *= scale
-        self.points[:, 1] *= scale
-        self.points[:, 2] *= scale
 
     def edgehash( self, edges ):
         'ravel vert idxs together to create a unique int per edge'
@@ -458,22 +393,6 @@ class TriMesh(object):
 
         return result
 
-    def copy(self):
-        'return duplicate mesh'
-        mesh = TriMesh(  self.points
-                        ,self.indicies 
-                        ,name  = self.name+'Copy'
-                        ,group = self.group
-                        ,edges = self.edges
-                        ,uvs   = self.uvs )
-        mesh.uvs   = self.uvs   
-        mesh.v2f   = self.v2f   
-        mesh.e2f   = self.e2f   
-        mesh.f2e   = self.f2e   
-        mesh.level = self.level 
-
-        return mesh
-
     def polar( self, f ):
         '''transform mesh to polar coordinates
         erase the seam to eliminate coplanar faces for visualization'''
@@ -487,7 +406,7 @@ class TriMesh(object):
       
         edgelengths = self.edgelengths()
    
-        longedges =  edgelengths < .5 * math.pi
+        longedges =  edgelengths < .5 * numpy.pi
         self.erase = self.binarysignal_e2f( longedges, numpy.minimum )
      
         return self
@@ -520,19 +439,6 @@ class TriMesh(object):
             
         return fsig, ncells
 
-    def uvzeros(self):
-        'init uvs'
-        self.uvs = numpy.zeros( (len(self.points), 2), dtype=DTYPE )
-
-    def __repr__(self):
-        'trimesh in string form'
-        return 'TriMesh('+\
-            repr(self.points)[6:-1]+\
-            ','+\
-            repr(self.indicies)[6:-1]+\
-            ', name ="'+\
-            self.name+'")'
-
     @staticmethod
     def cube():
         'a triangulated unit cube'
@@ -563,7 +469,7 @@ class TriMesh(object):
         (+-1, +-p, 0)
         (+-p, 0, +-1) 
         '''
-        p = (1.0 + math.sqrt(5))*.5
+        p = (1.0 + numpy.sqrt(5))*.5
 
         pts = numpy.zeros((12, 3), dtype=DTYPE)
         c = 0
@@ -594,7 +500,7 @@ class TriMesh(object):
         return imesh
 
     @staticmethod
-    def grid(tfaces=40, pfaces=20, int_coords=False):
+    def grid(tfaces=40, pfaces=20, xwidth=2.0*numpy.pi, ywidth=numpy.pi, radius=1.0, axis=(0,1,2) ):
         '''tri grid for spherical coordinates
         ntris = tfaces * pfaces * 2
         radius:          x == 1
@@ -623,19 +529,25 @@ class TriMesh(object):
         vu = numpy.cast[DTYPE]( numpy.mgrid[ 0:pverts, 0:tverts  ] )
 
         p = numpy.ones( (tverts*pverts, 3), dtype=DTYPE)
-        p[:, 1] = numpy.ravel( vu[1] )
-        p[:, 2] = numpy.ravel( vu[0] )
- 
-        if int_coords:
-            p[:, 1] /= tfaces
-            p[:, 2] /= pfaces
-            p[:, 1] -= .5
-            p[:, 2] -= .5
+        p[:,0] = radius
+        p[:,1] = numpy.ravel( vu[1] )
+        p[:,2] = numpy.ravel( vu[0] )
 
-            p[:, 1] *= 2 * numpy.pi
-            p[:, 2] *= numpy.pi
+        p[:,1] /= tfaces
+        p[:,2] /= pfaces
+        uvs = p[:,1:].copy()
+        p[:,1] -= .5
+        p[:,2] -= .5
 
-        return TriMesh( p, idxs )
+        p[:,1] *= xwidth
+        p[:,2] *= ywidth
+
+        np = numpy.ones( (tverts*pverts, 3), dtype=DTYPE)
+        np[:,0] = p[:,axis[0]]
+        np[:,1] = p[:,axis[1]]
+        np[:,2] = p[:,axis[2]]
+
+        return TriMesh( np, idxs, uvs=uvs )
 
 #if __name__ == '__main__':
 #

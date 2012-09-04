@@ -1,6 +1,6 @@
 # ----------------------------------------------------------------------------
 # seam
-# Copyright (c) 2011 Alex Harvill
+# Copyright (c) 2011-2012 Alex Harvill
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
@@ -52,7 +52,8 @@ class FixedMesh(object):
         self.group    = group
         self.uvs      = uvs
         self.colors   = colors
-                      
+
+        self.erase    = None
         self.nfaces   = None
         self.size     = None
         self.points   = None
@@ -79,17 +80,18 @@ class FixedMesh(object):
         try:
             self.indicies = numpy.array(indicies).astype(INTDTYPE)
             if len(self.indicies.shape) == 1:
-                self.nfaces = len(points)/self.verts_per_face
+                self.nfaces = len(self.indicies)/self.verts_per_face
                 self.indicies = self.indicies.reshape( (self.nfaces, self.verts_per_face) )
 
             assert( self.indicies.shape[1] == self.verts_per_face )
             self.nfaces = self.indicies.shape[0]
+            self.erase = numpy.ones( (self.nfaces), dtype = numpy.bool)
         except:
             raise Warning, 'needs an array like object of int '+self.verts_per_face_name
 
     def copy(self):
         'return duplicate mesh'
-        cls = super(self)
+        cls = super(FixedMesh, self)
         return cls(  self.points
                     ,self.indicies 
                     ,name   = self.name+'Copy'
@@ -99,12 +101,27 @@ class FixedMesh(object):
 
     def __repr__(self):
         'trimesh in string form'
-        return self.clsname+'('+\
-            repr(self.points)[6:-1]+\
-            ','+\
-            repr(self.indicies)[6:-1]+\
-            ', name ="'+\
-            self.name+'")'
+        startstrs = ('array(',)
+        endstrs   = (', dtype=int32)',', dtype=int64)',', dtype=float32)',', dtype=float64)')
+        def trimstr(pts, startstrs, endstrs):
+            for startstr in startstrs:
+                if pts.startswith(startstr):
+                    pts = pts[len(startstr):]
+            for endstr in endstrs:
+                if pts.endswith(endstr):
+                    pts = pts[:-1*len(endstr)]
+            return pts
+
+        pts  = trimstr( repr(self.points), startstrs, endstrs)
+        idxs = trimstr( repr(self.indicies), startstrs, endstrs)
+
+        return ''.join(( self.clsname, '(', pts, ',\n      ', idxs, ',name="', self.name, '")' ))
+
+    def antipodes( self, idx ):
+        'finds the point reflected about the origin'
+        inv = self.points[idx] * -1
+        dist = numpy.abs( numpy.inner( inv, self.points) - 1 )
+        return numpy.argmin( dist )
 
     def xformresult( self, mx ):
         'homogenious point matrix multiply, return result'
@@ -139,3 +156,32 @@ class FixedMesh(object):
     def color_ones(self):
         'set vertex colors to RGBA=1.0'
         self.colors = numpy.ones( (len(self.points),4), dtype=DTYPE )
+
+    def writeobj(self, filename ='/var/tmp/tmp.obj'):
+        'write obj with uvs if available, use self.erase to delete faces'
+        fd = open(filename, 'w')
+        numpy.savetxt( fd, self.points, delimiter =' ', fmt ='v %g %g %g')
+        if self.uvs != None:
+            numpy.savetxt( fd, self.uvs, delimiter =' ', fmt ='vt %g %g')
+
+            #repeat vert indicies 2x (1st verts then uvs)
+            shape = (len(self.indicies), self.verts_per_face*2)
+            vertuvspec = numpy.zeros( shape, dtype = INTDTYPE )
+
+            for i in range(self.verts_per_face):
+                j=i*2
+                vertuvspec[:, j+0] = self.indicies[:, i]
+                vertuvspec[:, j+1] = self.indicies[:, i]
+
+            facefmt = ['f'] + ['%g/%g']*self.verts_per_face
+            numpy.savetxt( fd, 
+                           vertuvspec[numpy.nonzero(self.erase)] + 1,
+                           delimiter =' ',
+                           fmt =' '.join(facefmt))
+        else:
+            facefmt = ['f'] + ['%g']*self.verts_per_face
+            numpy.savetxt( fd, 
+                           self.indicies[numpy.nonzero(self.erase)] + 1,
+                           delimiter =' ',
+                           fmt =' '.join(facefmt))
+        fd.close()
