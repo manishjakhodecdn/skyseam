@@ -38,6 +38,54 @@ import vecutil
 from constants import DTYPE, INTDTYPE
 from fixedmesh import FixedMesh
 
+class GridDescriptor( object ):
+    def __init__(self ):
+        'describe number of faces / verts in a mesh'
+        self.vert_shape = numpy.array( (0, 0), dtype=INTDTYPE  )
+        self.face_shape = numpy.array( (0, 0), dtype=INTDTYPE  )
+        self.n_faces    = 0
+        self.n_verts    = 0
+    
+    def set_vert_shape(self, value):
+        self.vert_shape = numpy.array( value, dtype=INTDTYPE  )
+        self.face_shape = self.vert_shape - 1
+
+        assert( self.face_shape.shape == (2,) )
+        assert( (self.vert_shape > 1).all() )
+
+        self.n_faces    = numpy.product( self.face_shape )
+        self.n_verts    = numpy.product( self.vert_shape )
+        return self
+
+    def set_face_shape(self, value):
+        return self.set_vert_shape( numpy.array( value, dtype=INTDTYPE  ) + 1 )
+
+    def indicies( self ):
+        'face -> vertex mapping'
+        fidxs = numpy.zeros( (self.n_faces, 4 ), dtype=INTDTYPE  )
+
+        vidxs = numpy.arange( self.n_verts, dtype=INTDTYPE ).reshape( self.vert_shape[::-1] )
+
+        fidxs[:,0] = vidxs[  :-1,  :-1].ravel()
+        fidxs[:,1] = vidxs[  :-1, 1:  ].ravel()
+        fidxs[:,2] = vidxs[ 1:  , 1:  ].ravel()
+        fidxs[:,3] = vidxs[ 1:  ,  :-1].ravel()
+        return fidxs
+
+    def points( self ): 
+        'points -> x = 0, y=axis_1 z=axis_2'
+        yz = numpy.mgrid[ 0:self.vert_shape[1], 0:self.vert_shape[0]  ].astype(DTYPE)
+
+        p = numpy.zeros( (self.n_verts, 3), dtype=DTYPE)
+        p[:,1] = numpy.ravel( yz[1] ) / self.face_shape[0]
+        p[:,2] = numpy.ravel( yz[0] ) / self.face_shape[1]
+
+        return p
+
+    def points_indicies( self ):
+        'returns a tuple of (points, indicies)'
+        return self.points(), self.indicies()
+
 class QuadMesh(FixedMesh):  
     'quad mesh with obj output'
     clsname = 'QuadMesh'
@@ -45,20 +93,70 @@ class QuadMesh(FixedMesh):
     verts_per_face_name = 'quads'
 
     @classmethod
-    def square(cls, axis=(0,1,2)):
-        'single quad face'
-        p = numpy.array( ((0,0,0)
-                         ,(1,0,0)
-                         ,(1,1,0)
-                         ,(0,1,0)), dtype=DTYPE)
+    def sphere(cls 
+              ,theta_faces = 33 
+              ,phi_faces   = 23
+              ,theta_lo    =  numpy.pi 
+              ,theta_hi    = -numpy.pi 
+              ,phi_lo      =  .5 * numpy.pi 
+              ,phi_hi      = -.5 * numpy.pi  ):
 
-        uvs = p[:,:2]
 
-        np = p.copy()
-        np[:,0] = p[:,axis[0]]
-        np[:,1] = p[:,axis[1]]
-        np[:,2] = p[:,axis[2]]
+        gd = GridDescriptor().set_face_shape( (theta_faces, phi_faces) )
+        idxs = gd.indicies()
 
-        idxs = numpy.array(( 0, 1, 2, 3), dtype=INTDTYPE)
+        pt     = numpy.array([[1., 0., 0., 1.]], dtype=numpy.float64)
 
-        return cls( np, idxs, uvs=uvs )
+        xy_arc = vecutil.revolve_bspline_fast( points    = pt
+                                              ,n_verts_u = gd.vert_shape[1]
+                                              ,n_verts_v = 1
+                                              ,start     = phi_lo
+                                              ,end       = phi_hi)
+            
+        yz_arc = vecutil.rotate(xy_arc, numpy.radians(90.0), 'x')
+
+        points = vecutil.revolve_bspline_fast( points    = yz_arc
+                                              ,n_verts_u = gd.vert_shape[0]
+                                              ,n_verts_v = gd.vert_shape[1]
+                                              ,start     = theta_lo
+                                              ,end       = theta_hi)
+
+        print(points)
+       #uvs = pts[:,1:].copy()
+
+       #pts[:,0] = radius
+       #pts[:,1] = (pts[:,1] - .5) * xwidth
+       #pts[:,2] = (pts[:,2] - .5) * ywidth
+
+       #return cls( pts, idxs, uvs=uvs ).swap_axes( axis )
+
+    @classmethod
+    def grid(cls, tfaces=40, pfaces=20, xwidth=2.0*numpy.pi, ywidth=numpy.pi, radius=1.0, axis=(0,1,2) ):
+        gd = GridDescriptor().set_face_shape( (tfaces, pfaces) )
+        pts, idxs = gd.grid_data()
+
+        uvs = pts[:,1:].copy()
+
+        pts[:,0] = radius
+        pts[:,1] = (pts[:,1] - .5) * xwidth
+        pts[:,2] = (pts[:,2] - .5) * ywidth
+
+        return cls( pts, idxs, uvs=uvs ).swap_axes( axis )
+
+    def asTriMesh(self):
+        import trimesh
+        
+        idxs = numpy.zeros((self.nfaces * 2, 3), dtype=INTDTYPE)
+        idxs[::2,0] = self.indicies[:,0]
+        idxs[::2,1] = self.indicies[:,1]
+        idxs[::2,2] = self.indicies[:,2]
+
+        idxs[1::2,0] = self.indicies[:,2]
+        idxs[1::2,1] = self.indicies[:,3]
+        idxs[1::2,2] = self.indicies[:,0]
+
+        return trimesh.TriMesh( self.points,
+                                idxs,
+                                name=self.name+'Tri',
+                                group=self.group,
+                                uvs=self.uvs)

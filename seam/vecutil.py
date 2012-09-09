@@ -37,7 +37,7 @@ import numpy
 import random
 import ctypes
 import math
-from constants import DTYPE
+from constants import DTYPE, INTDTYPE
 
 def vec3( x = 0.0, y = 0.0, z = 0.0):
     'numpy array triple helper'
@@ -53,6 +53,32 @@ Z  = vec3(0, 0, 1)
 SMALL = 0.0001
 TINY  = 0.00000001
 
+def resizevector( input, columns=4, fill=0.0 ):
+    if not hasattr( input, 'shape'):
+        input = numpy.array(input, dtype=DTYPE)
+    oned = len(input.shape) == 1
+    if oned:    
+        input = input[numpy.newaxis]
+    elif len(input.shape) != 2:
+        raise Warning( 'needs 1 or 2 dimensions')
+    rows = input.shape[0]
+
+    result = numpy.zeros( (rows,columns), dtype=input.dtype ) + fill
+
+    for i in range(min( input.shape[1], columns)):
+        result[:,i] = input[:,i]
+
+    if oned:
+        result = result[0]
+
+    return result
+
+def asvec3( input, fill=0.0):
+    return resizevector( input, columns=3, fill=fill )
+
+def asvec4( input, fill=0.0):
+    return resizevector( input, columns=4, fill=fill )
+
 def vlength(v):
     'wraps numpy, does not include possible homogenious coordinate'
     return numpy.linalg.norm(v[0:3])
@@ -64,7 +90,34 @@ def normalize(v):
         return v / length
     else:
         return v
+
+def vlengths(v):
+    x = v[:,0]
+    y = v[:,1]
+    z = v[:,2]
+    return numpy.sqrt( x*x + y*y + z*z)
         
+def normalizes(v):
+    x = v[:,0]
+    y = v[:,1]
+    z = v[:,2]
+    invscale = 1.0 / vlengths(v)
+    x *= invscale
+    y *= invscale
+    z *= invscale
+
+def randunitpts(n, seed = None):
+    'random unit length vectors'
+    if not seed == None:
+        numpy.random.seed(seed)
+    p = numpy.zeros( (n,3), dtype=DTYPE )
+    p[:,0] = numpy.random.uniform( 0, 1, n )
+    p[:,1] = numpy.random.uniform( 0, 1, n )
+    p[:,2] = numpy.random.uniform( 0, 1, n )
+
+    normalizes(p)
+    return p
+
 def randunitpt(seed = None):
     'a random unit length vector'
     if not seed == None:
@@ -74,12 +127,42 @@ def randunitpt(seed = None):
                      random.uniform(-1, 1) ), dtype=DTYPE)
     return normalize(v)
 
-def vecspace2( z, x ):
+def handlesFromMx( mx ):
+    'z and x from a matrix'
+    z = normalize(mx[2, :3])
+    y = normalize(mx[1, :3])
+    x = normalize(numpy.cross( y, z ))
+
+    righthanded = numpy.linalg.det( mx ) > 0
+
+    return z, x, righthanded, mx[3,:3]
+
+def mxFromHandles( z, x, righthanded, pos ):
+    mx = vecspace2( z, x, righthanded )
+    mx[3,:3] = pos
+    return mx
+
+def mxFromXYQuad( points ):
+    '''TODO FIX support 4 point cornerpins using homography'''
+    p0 = points[0]
+    p1 = points[1]
+    p2 = points[3]
+
+    result = numpy.identity(4, dtype=points.dtype)
+    result[0,:3] = p1 - p0
+    result[1,:3] = p2 - p0
+    result[3,:3] = p0
+    return result
+
+def vecspace2( z, x, righthanded=True ):
     'obect space matrix along a given z axis'
     z = normalize(z)
     x = normalize(x)
     y = normalize(numpy.cross( x, z ))
     x = normalize(numpy.cross( y, z ))
+
+    if not righthanded:
+        y *= -1
 
     mx = numpy.zeros((4, 4), dtype=DTYPE)
     mx[0, :3] = x
@@ -106,7 +189,7 @@ def vecspace( z ):
     return mx
 
 def scalematrix( x = 0.0, y = 0.0, z = 0.0):
-    'translate xform helper'
+    'scale xform helper'
     m = numpy.array( [[ x , 0., 0., 0 ]
                      ,[ 0., y , 0., 0 ]
                      ,[ 0., 0., z , 0 ]
@@ -157,6 +240,35 @@ def zrotatematrix( t, degrees = False):
                      [  0,  0,  0,  1]], dtype=DTYPE)
     return r
 
+
+def rotate(pts, angle, axis, degrees = False):
+    'rotate points by angle, around axis x, y or z'
+    matrix = numpy.identity(4)
+    if axis == 'x':
+        matrix = xrotatematrix(angle, degrees)        
+    elif axis == 'y':
+        matrix = yrotatematrix(angle, degrees)        
+    elif axis == 'z':
+        matrix = zrotatematrix(angle, degrees)
+    return numpy.dot(pts, matrix)
+
+def translate(pts, x=0.0, y=0.0, z=0.0):
+    'translate points'
+    matrix = translatematrix(x, y, z)
+    return numpy.dot(pts, matrix)
+
+def scale(pts, x=1.0, y=1.0, z=1.0):
+    'scale points'
+    matrix = scalematrix(x, y, z)
+    return numpy.dot(pts, matrix)
+
+
+def raisedividebyzero():
+    numpy.seterr( divide='raise' )
+
+def warndividebyzero():
+    numpy.seterr( divide='warn' )
+
 def pointmatrixmult( point, mx ):
     'homogenious point matrix multiply, return result'
     if len(point.shape) == 1:
@@ -169,7 +281,8 @@ def pointmatrixmult( point, mx ):
     hpoints[:, 0] /= wcoords
     hpoints[:, 1] /= wcoords
     hpoints[:, 2] /= wcoords
-    return hpoints[:, :3]
+    npoints = hpoints[:, :3]
+    return numpy.ascontiguousarray(npoints)
 
 def polar2xyz( points ):
     'transform points to cartesian'
@@ -207,24 +320,82 @@ def xyz2polar( points ):
     points[:, 1] = u
     points[:, 2] = v
 
+
+
+#   ntype2ctype = {numpy.float64 : ctypes.c_double
+#                 ,numpy.uint32  : ctypes.c_uint32
+#                 ,numpy.int32   : ctypes.c_int32
+#                 ,numpy.uint64  : ctypes.c_uint64
+#                 ,numpy.int64   : ctypes.c_int64
+#                 ,numpy.int8    : ctypes.c_int8 }
+
+def ntype2ctype(n):
+    if isinstance(n,numpy.ndarray):
+        n = n.dtype
+
+    ptype =  ctypes.c_float
+    if n == numpy.float64: 
+        ptype =  ctypes.c_double
+    if n == numpy.uint32: 
+        ptype =  ctypes.c_uint32
+    if n == numpy.int32: 
+        ptype =  ctypes.c_int32
+    if n == numpy.uint64: 
+        ptype =  ctypes.c_uint64
+    if n == numpy.int64: 
+        ptype =  ctypes.c_int64
+    if n == numpy.int8: 
+        ptype =  ctypes.c_int8
+
+    return ptype
+
+def numpy2pointerref(a):
+    '''returns a ctypes compatable pointer to the numpy array
+    most arrays will already be contiguousarray, so probably a no-op
+    unfortunately numpy.ndarray.ctypes.data_as is undocumented
+    return the contiguous array to avoid garbage collection
+    '''
+
+    ptype = ntype2ctype( a )
+#   print( a.dtype, ptype)
+#   ptype =  ctypes.c_float
+#   if a.dtype in ntype2ctype
+#   if a.dtype == numpy.float64: 
+#       ptype =  ctypes.c_double
+#   if a.dtype == numpy.uint32: 
+#       ptype =  ctypes.c_uint32
+#   if a.dtype == numpy.int32: 
+#       ptype =  ctypes.c_int32
+#   if a.dtype == numpy.uint64: 
+#       ptype =  ctypes.c_uint64
+#   if a.dtype == numpy.int64: 
+#       ptype =  ctypes.c_int64
+#   if a.dtype == numpy.int8: 
+#       ptype =  ctypes.c_int8
+
+    na = numpy.ascontiguousarray(a)
+    return na.ctypes.data_as(ctypes.POINTER(ptype)), na
+
+
 def numpy2pointer(a):
     '''returns a ctypes compatable pointer to the numpy array
     most arrays will already be contiguousarray, so probably a no-op
     unfortunately numpy.ndarray.ctypes.data_as is undocumented
     '''
 
-    match = { numpy.int64  :ctypes.c_int64,
-              numpy.int32  :ctypes.c_int32,
-              numpy.float32:ctypes.c_float,
-              numpy.float64:ctypes.c_double }
-
     ptype =  ctypes.c_float
     if a.dtype == numpy.float64: 
         ptype =  ctypes.c_double
+    if a.dtype == numpy.uint32: 
+        ptype =  ctypes.c_uint32
     if a.dtype == numpy.int32: 
         ptype =  ctypes.c_int32
+    if a.dtype == numpy.uint64: 
+        ptype =  ctypes.c_uint64
     if a.dtype == numpy.int64: 
         ptype =  ctypes.c_int64
+    if a.dtype == numpy.int8: 
+        ptype =  ctypes.c_int8
 
     a = numpy.ascontiguousarray(a)
     return a.ctypes.data_as(ctypes.POINTER(ptype))
@@ -343,9 +514,132 @@ def sphere_line_intersection(l1, l2, sp, r):
 
     return p1, p2
 
+def matrixstackmultfull(a,b):
+    result = numpy.zeros(a.shape)
+    for i in range(0,4):
+        for j in range(0,4):
+            for k in range(0,4):
+                result[i,j] += a[i,k] * b[k,j]
+
+    return result
+
+def matrixstackmult(a,b):
+    result = numpy.zeros(a.shape)
+    for i in range(0,4):
+        for j in range(0,4):
+            result[:,i,j] = numpy.sum( a[:,i,:] * b[:,:,j], axis=1)
+           #for k in range(0,4):
+           #    result[i,j] += a[i,k] * b[k,j]
+
+    return result
+
+def revolve_bspline_fast( points, n_verts_u, n_verts_v, start, end):
+    '''optimized version of revolve_bspline_slow
+    makes a bspline curve / surface of revolution
+    sweeps points out around the z axis
+    like all bsplines, verts[0] and verts[-1] are outside the sweep range
+    '''
+    n_spans = n_verts_u - 3
+    assert( n_verts_v == len(points) )
+    assert( n_spans   > 0 )
+
+        #scalars
+    full_angle  = end - start
+    delta_angle = full_angle / n_spans
+    radius      = 3./(2. + numpy.cos(delta_angle))
+
+        #vectors of length n_verts_u
+    indexes     = numpy.arange( n_verts_u )
+    steps       = (indexes-1) * delta_angle
+    angles      = start + steps
+    cos_scale   = radius * numpy.cos(angles)
+    sin_scale   = radius * numpy.sin(angles)
+
+        #grids of shape [n_verts_u*n_verts_v, 4]
+    input_grid  = points.repeat( n_verts_u, axis=0 )
+    result      = input_grid.copy()
+
+        #vectors of length n_verts_u*n_verts_v
+    x, y        = input_grid[:,0], input_grid[:,1]
+    cos_scale   = cos_scale[numpy.newaxis].repeat(n_verts_v,axis=0).ravel()
+    sin_scale   = sin_scale[numpy.newaxis].repeat(n_verts_v,axis=0).ravel()
+        
+                  #rotate and scale x,y points into swept position
+    result[:,0] = cos_scale * x + ( -1 * sin_scale * y )
+    result[:,1] = cos_scale * y + (      sin_scale * x )
+  
+    if n_verts_v != 1:
+        result = result.reshape( (n_verts_v,n_verts_u,4) )
+    return result
+
+def revolve_bspline_slow( points, n_verts_u, n_verts_v, start, end):
+    '''straightforward method to make a bspline curve / surface of revolution
+    sweeps points out around the z axis
+    like all bsplines, verts[0] and verts[-1] are outside the sweep range
+    '''
+
+    n_spans     = n_verts_u - 3
+    full_angle  = end - start
+    delta_angle = full_angle / n_spans
+    radius      = 3./(2. + numpy.cos(delta_angle))
+
+    result = []
+    for index in range(n_verts_u):
+        step = (index-1) * delta_angle
+        current_angle = start + step
+
+        cos_scale = radius * numpy.cos(current_angle)
+        sin_scale = radius * numpy.sin(current_angle)
+
+        npoints = points.copy()
+
+        npoints[:,0] = cos_scale * points[:,0] + ( -1 * sin_scale * points[:,1] )
+        npoints[:,1] = cos_scale * points[:,1] + (      sin_scale * points[:,0] )
+
+        result.append( npoints )
+
+    if n_verts_v == 1:
+        return numpy.array( result )[:,0,:]
+
+    return numpy.array( result).transpose( 1, 0, 2)
+
 if __name__ == '__main__':
-   
-    p0 = vec3( 1,  1, 0) 
-    p1 = vec3( 1, -1, 0)
-    hits = sphere_line_intersection( p0, p1, vec3(), 1.0 )
-    print(hits)
+    pass
+#   v_div = 10
+#   vlo = -.1
+#   vhi = .1
+#   circ = bSplineSweep(numpy.array([1., 0., 0., 1.], dtype=numpy.float64), v_div, (vlo, vhi))
+#   print( circ ) 
+
+#   u_faces = 22
+#   v_faces = 12
+#   u_verts = u_faces + 1
+#   v_verts = v_faces + 1
+#   r0 = meshtest()
+#   r = grid_indexes( u_verts, v_verts )
+#   r = grid_indexes( (u_verts, v_verts) )
+#   print(r)
+#   print( (r0 == r.ravel()).all() )
+
+#   indexes = numpy.arange( v_verts * u_verts ).reshape( (v_verts, u_verts) )
+
+#   v0 = indexes[  :-1,  :-1]
+#   v1 = indexes[  :-1, 1:  ]
+#   v2 = indexes[ 1:  , 1:  ]
+#   v3 = indexes[ 1:  ,  :-1]
+#   print( v3 )
+   #basis = numpy.mgrid[:5, :4]
+   #print( basis[1,:,:] + ( basis[0,:,:]*4))
+
+#   print( ( meshindexes( 22, 12 ) == meshtest()).all()  )
+    
+#   import frustum
+#   n = 10
+#   a = numpy.mgrid[:16].astype('f8')
+#   a = numpy.tile( a, n )
+#   a = a.reshape( (n,4,4) )
+
+#   d = numpy.dot( a[0], a[0] )
+#   h = matrixstackmult(a,a)
+
+#   print(numpy.allclose(d,h[0]))

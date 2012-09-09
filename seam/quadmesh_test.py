@@ -33,11 +33,31 @@
 # ----------------------------------------------------------------------------
 'test quad mesh'
 
-def test_squre():
+def test_sphere():
     import quadmesh
-    i = quadmesh.QuadMesh.square()
+    i = quadmesh.QuadMesh.sphere()
 
 def test_obj():
     import quadmesh
     i = quadmesh.QuadMesh.square()#axis=(1,2,0))
     i.writeobj()
+
+def test_asTriMesh():
+    import quadmesh
+    i = quadmesh.QuadMesh.grid()#axis=(1,2,0))
+    print(i)
+   #t = i.asTriMesh()
+   #t.writeobj()
+
+def test_grid():
+    import vecutil
+    import quadmesh
+    o = vecutil.meshtest()
+
+    pts, idx = quadmesh.GridDescriptor().set_face_shape( (22, 12) ).grid_data()
+    print( (idx == o).all() )
+
+if __name__ == '__main__':
+#   test_asTriMesh()
+
+    test_sphere()

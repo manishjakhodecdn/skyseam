@@ -185,3 +185,11 @@ class FixedMesh(object):
                            delimiter =' ',
                            fmt =' '.join(facefmt))
         fd.close()
+
+    def swap_axes(self, axis=(0,1,2) ):
+        newpts = self.points.copy()
+        newpts[:,0] = self.points[:,axis[0]]
+        newpts[:,1] = self.points[:,axis[1]]
+        newpts[:,2] = self.points[:,axis[2]]
+        self.points = newpts
+        return self
