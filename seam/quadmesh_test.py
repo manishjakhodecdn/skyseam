@@ -35,7 +35,12 @@
 
 def test_sphere():
     import quadmesh
-    i = quadmesh.QuadMesh.sphere()
+    import numpy
+    i = quadmesh.QuadMesh.sphere( theta_lo = -.5 * numpy.pi
+                                 ,theta_hi =  .5 * numpy.pi 
+                                 ,phi_lo   = -.25 * numpy.pi  
+                                 ,phi_hi   =  .25 * numpy.pi )
+    i.writeobj()
 
 def test_obj():
     import quadmesh

@@ -72,6 +72,33 @@ class GridDescriptor( object ):
         fidxs[:,3] = vidxs[ 1:  ,  :-1].ravel()
         return fidxs
 
+    def uvs( self, bspline=False, flip=(False,False) ): 
+        '''uvs -> u = axis_1, v = axis_2
+        for bspline patch - coords a unit square for all coords but the edges'''
+        vu = numpy.mgrid[ 0:self.vert_shape[1], 0:self.vert_shape[0]  ].astype(DTYPE)
+
+        u = numpy.ravel( vu[1] )
+        v = numpy.ravel( vu[0] )
+
+        if bspline:
+            u = ( u - 1 ) / ( self.face_shape[0] - 2 )
+            v = ( v - 1 ) / ( self.face_shape[1] - 2 )
+        else:
+            u = u / self.face_shape[0]
+            v = v / self.face_shape[1]
+
+        if flip[0]:
+            u = u * -1 + 1
+
+        if flip[1]:
+            v = v * -1 + 1
+
+        p = numpy.zeros( (self.n_verts, 2), dtype=DTYPE)
+        p[:,0] = u
+        p[:,1] = v
+
+        return p
+
     def points( self ): 
         'points -> x = 0, y=axis_1 z=axis_2'
         yz = numpy.mgrid[ 0:self.vert_shape[1], 0:self.vert_shape[0]  ].astype(DTYPE)
@@ -102,8 +129,9 @@ class QuadMesh(FixedMesh):
               ,phi_hi      = -.5 * numpy.pi  ):
 
 
-        gd = GridDescriptor().set_face_shape( (theta_faces, phi_faces) )
-        idxs = gd.indicies()
+        gd     = GridDescriptor().set_face_shape( (theta_faces, phi_faces) )
+        idxs   = gd.indicies()
+        uvs    = gd.uvs( bspline=True, flip=(True,False))
 
         pt     = numpy.array([[1., 0., 0., 1.]], dtype=numpy.float64)
 
@@ -121,14 +149,9 @@ class QuadMesh(FixedMesh):
                                               ,start     = theta_lo
                                               ,end       = theta_hi)
 
-        print(points)
-       #uvs = pts[:,1:].copy()
+        points = points[:,:,:3].reshape( (gd.n_verts, 3) )
 
-       #pts[:,0] = radius
-       #pts[:,1] = (pts[:,1] - .5) * xwidth
-       #pts[:,2] = (pts[:,2] - .5) * ywidth
-
-       #return cls( pts, idxs, uvs=uvs ).swap_axes( axis )
+        return cls( points.ravel(), idxs, uvs=uvs )
 
     @classmethod
     def grid(cls, tfaces=40, pfaces=20, xwidth=2.0*numpy.pi, ywidth=numpy.pi, radius=1.0, axis=(0,1,2) ):
