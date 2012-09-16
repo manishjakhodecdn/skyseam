@@ -72,6 +72,36 @@ class GridDescriptor( object ):
         fidxs[:,3] = vidxs[ 1:  ,  :-1].ravel()
         return fidxs
 
+    def _uremap( self, u ):
+        'normalize u'            
+        return u / self.face_shape[0]
+
+    def _vremap( self, v ):
+        'normalize v'            
+        return v / self.face_shape[1]
+
+    def uvs( self, flip=(False,False) ): 
+        'uvs -> u = axis_1, v = axis_2'
+        vu = numpy.mgrid[ 0:self.vert_shape[1], 0:self.vert_shape[0]  ].astype(DTYPE)
+
+        u = numpy.ravel( vu[1] )
+        v = numpy.ravel( vu[0] )
+
+        u = self._uremap( u )
+        v = self._vremap( v )
+
+        if flip[0]:
+            u = u * -1 + 1
+
+        if flip[1]:
+            v = v * -1 + 1
+
+        p = numpy.zeros( (self.n_verts, 2), dtype=DTYPE)
+        p[:,0] = u
+        p[:,1] = v
+
+        return p
+
     def points( self ): 
         'points -> x = 0, y=axis_1 z=axis_2'
         yz = numpy.mgrid[ 0:self.vert_shape[1], 0:self.vert_shape[0]  ].astype(DTYPE)
@@ -87,63 +117,41 @@ class GridDescriptor( object ):
         return self.points(), self.indicies()
 
 class QuadMesh(FixedMesh):  
-    'quad mesh with obj output'
+    'quad mesh with sphere approximation, obj output and trimesh conversion'
     clsname = 'QuadMesh'
     verts_per_face = 4
     verts_per_face_name = 'quads'
 
     @classmethod
-    def sphere(cls 
-              ,theta_faces = 33 
-              ,phi_faces   = 23
-              ,theta_lo    =  numpy.pi 
-              ,theta_hi    = -numpy.pi 
-              ,phi_lo      =  .5 * numpy.pi 
-              ,phi_hi      = -.5 * numpy.pi  ):
+    def sphere(cls, *args, **kwargs):
+        'build a grid and convertion to spherical coords'
+        i = cls.grid( *args, **kwargs )
+        vecutil.polar2xyz(i.points)
 
-
-        gd = GridDescriptor().set_face_shape( (theta_faces, phi_faces) )
-        idxs = gd.indicies()
-
-        pt     = numpy.array([[1., 0., 0., 1.]], dtype=numpy.float64)
-
-        xy_arc = vecutil.revolve_bspline_fast( points    = pt
-                                              ,n_verts_u = gd.vert_shape[1]
-                                              ,n_verts_v = 1
-                                              ,start     = phi_lo
-                                              ,end       = phi_hi)
-            
-        yz_arc = vecutil.rotate(xy_arc, numpy.radians(90.0), 'x')
-
-        points = vecutil.revolve_bspline_fast( points    = yz_arc
-                                              ,n_verts_u = gd.vert_shape[0]
-                                              ,n_verts_v = gd.vert_shape[1]
-                                              ,start     = theta_lo
-                                              ,end       = theta_hi)
-
-        print(points)
-       #uvs = pts[:,1:].copy()
-
-       #pts[:,0] = radius
-       #pts[:,1] = (pts[:,1] - .5) * xwidth
-       #pts[:,2] = (pts[:,2] - .5) * ywidth
-
-       #return cls( pts, idxs, uvs=uvs ).swap_axes( axis )
+        return i
 
     @classmethod
-    def grid(cls, tfaces=40, pfaces=20, xwidth=2.0*numpy.pi, ywidth=numpy.pi, radius=1.0, axis=(0,1,2) ):
-        gd = GridDescriptor().set_face_shape( (tfaces, pfaces) )
-        pts, idxs = gd.grid_data()
+    def grid(cls
+            ,theta_faces = 31 
+            ,phi_faces   = 21
+            ,theta_lo    =  numpy.pi 
+            ,theta_hi    = -numpy.pi 
+            ,phi_lo      =  .5 * numpy.pi 
+            ,phi_hi      = -.5 * numpy.pi  ):
+        'construct a grid with reasonable defaults for spherical mapping'
+        gd = GridDescriptor().set_face_shape( (theta_faces, phi_faces) )
+        pts, idxs = gd.points_indicies()
 
-        uvs = pts[:,1:].copy()
+        uvs = gd.uvs( flip=(True,False) )
 
-        pts[:,0] = radius
-        pts[:,1] = (pts[:,1] - .5) * xwidth
-        pts[:,2] = (pts[:,2] - .5) * ywidth
+        pts[:,0] = 1.0
+        pts[:,1] = pts[:,1]*(theta_hi - theta_lo) + theta_lo
+        pts[:,2] = pts[:,2]*(phi_hi   - phi_lo  ) + phi_lo  
 
-        return cls( pts, idxs, uvs=uvs ).swap_axes( axis )
+        return cls( pts, idxs, uvs=uvs )
 
     def asTriMesh(self):
+        'each quad -> 2 tris'
         import trimesh
         
         idxs = numpy.zeros((self.nfaces * 2, 3), dtype=INTDTYPE)

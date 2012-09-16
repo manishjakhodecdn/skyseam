@@ -34,35 +34,14 @@
 'test quad mesh'
 
 def test_sphere():
-    import quadmesh
+    import bsplinepatch
     import numpy
-    i = quadmesh.QuadMesh.sphere( theta_lo = -.5 * numpy.pi
-                                 ,theta_hi =  .5 * numpy.pi 
-                                 ,phi_lo   = -.25 * numpy.pi  
-                                 ,phi_hi   =  .25 * numpy.pi )
+    i = bsplinepatch.BSplinePatch.sphere( theta_lo = -.5 * numpy.pi
+                                         ,theta_hi =  .5 * numpy.pi 
+                                         ,phi_lo   = -.25 * numpy.pi  
+                                         ,phi_hi   =  .25 * numpy.pi )
 
     i.writeobj()
-
-def test_obj():
-    import quadmesh
-    i = quadmesh.QuadMesh.square()#axis=(1,2,0))
-    i.writeobj()
-
-def test_asTriMesh():
-    import quadmesh
-    i = quadmesh.QuadMesh.grid()#axis=(1,2,0))
-    print(i)
-   #t = i.asTriMesh()
-   #t.writeobj()
-
-def test_grid():
-    import vecutil
-    import quadmesh
-    o = vecutil.meshtest()
-
-    pts, idx = quadmesh.GridDescriptor().set_face_shape( (22, 12) ).grid_data()
-    print( (idx == o).all() )
-
 if __name__ == '__main__':
 #   test_asTriMesh()
 
