@@ -57,3 +57,18 @@ def test_obj():
 
     g = trimesh.TriMesh.grid()
     g.writeobj()
+
+def vertsinfrustum():
+    import trimesh
+    i = trimesh.TriMesh.cube()
+
+    print(i.points)
+
+    import frustum
+    f = frustum.Frustum().lrtbnf( (-1, 1, 1, -1, -1, 1) ).orthographic()
+
+    import vecutil
+    f.ctw = vecutil.mat4()
+
+    print( i.vertsinfrustum( f.wtc, f.wts ) )
+vertsinfrustum()
