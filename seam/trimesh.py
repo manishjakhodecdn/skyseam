@@ -299,16 +299,19 @@ class TriMesh(FixedMesh):
         return True/False numpy bool for each vert
         '''
 
-        campoints    = self.xformresult( w2c )
+       #campoints    = self.xformresult( w2c )
         screenpoints = self.xformresult( w2s )
 
         x = numpy.abs(screenpoints[:, 0])
         y = numpy.abs(screenpoints[:, 1])
-        z = campoints[:, 2]
+        z = numpy.abs(screenpoints[:, 2])
+       #z = campoints[:, 2]
+
+       #print(screenpoints[:, 2])
 
         xvisible = x < 1.0 + vecutil.SMALL 
         yvisible = y < 1.0 + vecutil.SMALL 
-        zvisible = z < vecutil.SMALL     
+        zvisible = z < 1.0 + vecutil.SMALL #vecutil.SMALL     
 
         xyvisible  = numpy.minimum( xvisible, yvisible)
         xyzvisible = numpy.minimum( xyvisible, zvisible)
