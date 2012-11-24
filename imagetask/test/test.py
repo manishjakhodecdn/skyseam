@@ -1,5 +1,5 @@
-import exrinfo
-import exrinfoext
+from imagetask import exrinfo
+from imagetask import exrinfoext
 import os
 from pprint import pprint
 import logging
