@@ -39,16 +39,19 @@ class ExrInfo( object ):
             cls.read_exr_info = l.read_exr_info
             cls.read_exr_info.argtypes = cls.argtypes
 
-    def __init__( self, path, read_buffer=True ):
+    def __init__( self, path, read_buffer=True, aspect=None, max_width=256, max_height=256 ):
         self.attributes  = {}
         self.path        = path
-        self.max_width   = 256
-        self.max_height  = 1024
+        self.aspect      = aspect
+        self.max_width   = max_width
+        self.max_height  = max_height
         self.width       = None
         self.height      = None
         self.orig_width  = None
         self.orig_height = None
         self.buffer      = None
+        self.error       = ''
+        self.warnings    = []
 
         
         error = ctypes.c_char_p()
@@ -67,11 +70,17 @@ class ExrInfo( object ):
                                     self.namedChannel()
                                     )
         if status != 0:
-            raise Warning( error_p[0] )
+            self.error = str( error_p[0] )
 
     def sizeFromOrig( self ):
-        self.width  = self.max_width
-        self.height = int(round( self.orig_height * ( self.width / float(self.orig_width))))
+        self.width  = min( self.max_width, self.orig_width )
+
+        if self.aspect is not None:
+            aspect = self.descriptor.aspectratio
+        else:               
+            aspect = self.orig_width / float(self.orig_height)
+
+        self.height = int(round( self.width / aspect ))
             
     def allocBuffer( self ):
         def closure( orig_width, orig_height, new_width, new_height):
@@ -133,7 +142,7 @@ class ExrInfo( object ):
     
     def missingType( self ):
         def closure( name, value ):
-            logging.debug('exrinfo:ignoring exr attr[%s] of unknown type[%s]'%(name, value))
+            self.warnings.append( 'exrinfo:ignoring exr attr[%s] of unknown type[%s]'%(name, value) )
             return 0
         return self.Missing_Type_Function_p(closure)
 
