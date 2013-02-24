@@ -195,7 +195,7 @@ class FixedMesh(object):
     def fromobj( cls, filename ):
         '''remove comments and blank lines
         separate v, vt, and f sections into different lists
-        read each in using numpy.fromfile (have to write to tmp file for now)
+        read v, vt and f using numpy.fromstring
         '''
         vert_lines          = []
         uv_lines            = []
@@ -216,20 +216,18 @@ class FixedMesh(object):
 
         face_shape = numpy.array(example_face).shape
 
-        def write_read_buffer( lines, dt, components, replace=None ):
+        def read_buffer( lines, dt, components, replace=None ):
             num = len(lines)
             buffer = ' '.join( lines )
             if replace:
                 buffer = buffer.replace( replace, ' ')
 
-            with open('tmp', 'w') as fd:
-                fd.write( buffer )
-            result = numpy.fromfile( 'tmp', dtype=dt, sep=' ')
+            result = numpy.fromstring( buffer, dtype=dt, sep=' ')
             return result.reshape( (num,components) )
 
-        verts         = write_read_buffer( vert_lines, DTYPE, 3 )
-        uvs           = write_read_buffer( uv_lines, DTYPE, 2 )
-        face_indicies = write_read_buffer( face_lines, INTDTYPE, face_shape[0] * face_shape[1], '/' )
+        verts         = read_buffer( vert_lines, DTYPE, 3 )
+        uvs           = read_buffer( uv_lines, DTYPE, 2 )
+        face_indicies = read_buffer( face_lines, INTDTYPE, face_shape[0] * face_shape[1], '/' )
 
         num_face_components = face_shape[1]
         indicies = face_indicies[:,::num_face_components] - 1
