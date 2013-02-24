@@ -95,7 +95,7 @@ def convertExtendedInfo( element ):
 
 
 class ExrInfoExt( exrinfo.ExrInfo ):
-    def __init__( self, path, read_buffer=True ):
+    def __init__( self, path, read_buffer=True, aspect=None, max_width=256, max_height=256 ):
         super( ExrInfoExt, self).__init__( path, read_buffer=read_buffer )
 
         ee_str  = self.attributes.get( 'extendedInfo', None )

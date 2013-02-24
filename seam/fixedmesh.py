@@ -43,21 +43,23 @@ class FixedMesh(object):
     def __init__(self,
                  points,
                  indicies,
-                 name   = 'None',
-                 group  = None,
-                 uvs    = None,
-                 colors = None):
+                 name        = 'None',
+                 group       = None,
+                 uvs         = None,
+                 colors      = None,
+                 uv_indicies = None):
 
-        self.name     = name
-        self.group    = group
-        self.uvs      = uvs
-        self.colors   = colors
+        self.name        = name
+        self.group       = group
+        self.uvs         = uvs
+        self.colors      = colors
+        self.uv_indicies = uv_indicies
 
-        self.erase    = None
-        self.nfaces   = None
-        self.size     = None
-        self.points   = None
-        self.indicies = None
+        self.erase       = None
+        self.nfaces      = None
+        self.size        = None
+        self.points      = None
+        self.indicies    = None
 
         self.setpoints( points )
         self.setindicies( indicies )
@@ -164,14 +166,17 @@ class FixedMesh(object):
         if self.uvs != None:
             numpy.savetxt( fd, self.uvs, delimiter =' ', fmt ='vt %g %g')
 
-            #repeat vert indicies 2x (1st verts then uvs)
-            shape = (len(self.indicies), self.verts_per_face*2)
-            vertuvspec = numpy.zeros( shape, dtype = INTDTYPE )
+            if self.uv_indicies is None:
+                #repeat vert indicies 2x (1st verts then uvs)
+                shape = (len(self.indicies), self.verts_per_face*2)
+                vertuvspec = numpy.zeros( shape, dtype = INTDTYPE )
 
-            for i in range(self.verts_per_face):
-                j=i*2
-                vertuvspec[:, j+0] = self.indicies[:, i]
-                vertuvspec[:, j+1] = self.indicies[:, i]
+                for i in range(self.verts_per_face):
+                    j=i*2
+                    vertuvspec[:, j+0] = self.indicies[:, i]
+                    vertuvspec[:, j+1] = self.indicies[:, i]
+            else:
+                vertuvspec = self.uv_indicies
 
             facefmt = ['f'] + ['%g/%g']*self.verts_per_face
             numpy.savetxt( fd, 
@@ -186,8 +191,56 @@ class FixedMesh(object):
                            fmt =' '.join(facefmt))
         fd.close()
 
-    def swap_axes(self, axis=(0,1,2) ):
-        newpts = self.points.copy()
+    @classmethod
+    def fromobj( cls, filename ):
+        '''remove comments and blank lines
+        separate v, vt, and f sections into different lists
+        read each in using numpy.fromfile (have to write to tmp file for now)
+        '''
+        vert_lines          = []
+        uv_lines            = []
+        face_lines          = []
+
+        with open(filename, 'r') as fd:
+            for l in fd:
+                if l.startswith('v '):
+                    vert_lines.append( l[2:-1])
+                elif l.startswith('f '):
+                    face_lines.append( l[2:-1] )
+                elif l.startswith('vt '):
+                    uv_lines.append( l[3:-1] )
+
+        example_face = []
+        for x in face_lines[0].split(' '):
+            example_face.append( [int(y) for y in x.split('/')] )
+
+        face_shape = numpy.array(example_face).shape
+
+        def write_read_buffer( lines, dt, components, replace=None ):
+            num = len(lines)
+            buffer = ' '.join( lines )
+            if replace:
+                buffer = buffer.replace( replace, ' ')
+
+            with open('tmp', 'w') as fd:
+                fd.write( buffer )
+            result = numpy.fromfile( 'tmp', dtype=dt, sep=' ')
+            return result.reshape( (num,components) )
+
+        verts         = write_read_buffer( vert_lines, DTYPE, 3 )
+        uvs           = write_read_buffer( uv_lines, DTYPE, 2 )
+        face_indicies = write_read_buffer( face_lines, INTDTYPE, face_shape[0] * face_shape[1], '/' )
+
+        num_face_components = face_shape[1]
+        indicies = face_indicies[:,::num_face_components] - 1
+        if face_shape[1] > 1:
+            uv_indicies = face_indicies[:,1::num_face_components] - 1
+
+        result = cls( verts, indicies, uvs=uvs, uv_indicies=uv_indicies, name=filename )
+        return result
+                                                 
+    def swap_axes(self, axis=(0,1,2) ):          
+        newpts = self.points.copy()              
         newpts[:,0] = self.points[:,axis[0]]
         newpts[:,1] = self.points[:,axis[1]]
         newpts[:,2] = self.points[:,axis[2]]
