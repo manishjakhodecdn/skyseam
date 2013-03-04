@@ -143,7 +143,7 @@ def mxFromHandles( z, x, righthanded, pos ):
     return mx
 
 def mxFromXYQuad( points ):
-    '''TODO FIX support 4 point cornerpins using homography'''
+    '3 point affine mapping'
     p0 = points[0]
     p1 = points[1]
     p2 = points[3]
@@ -153,6 +153,61 @@ def mxFromXYQuad( points ):
     result[1,:3] = p2 - p0
     result[3,:3] = p0
     return result
+
+def mxFromXYQuadPerspective(points):
+    '''4 point corner pin mapping
+     sovle A * H = 0, where A = [  0  -w*p  y*p ]
+                                [ w*p   0  -x*p ]
+                                [-y*p  x*p   0  ]
+    xp = unit square * p.x
+    yp = unit square * p.y
+    wp = unit square  ( p.w is == 1 )
+    p is a list of 4 points
+
+    can be generalized to any n points -- restrict to quads for now.
+
+    H is gven by the last column of V where
+    A = UEVt is the signular value decomposition of A
+
+    full explanation:
+    http://www.cse.iitd.ac.in/~suban/vision/geometry/node24.html
+
+    serial code:
+    https://github.com/relet/Holodeck-Minigolf/blob/master/homography.py
+'''
+    wp = numpy.array([[ 0, 0, 1],
+                      [ 1, 0, 1],
+                      [ 1, 1, 1],
+                      [ 0, 1, 1]]).astype( 'f8')
+
+    xp, yp = wp.copy(), wp.copy()
+    xp[:,0] *= points[:,0]
+    xp[:,1] *= points[:,0]
+    xp[:,2] *= points[:,0]
+
+    yp[:,0] *= points[:,1]
+    yp[:,1] *= points[:,1]
+    yp[:,2] *= points[:,1]
+
+    A = numpy.zeros((12,9),dtype='f8')
+    A[0::3, 3:6] = -wp
+    A[0::3, 6:9] =  yp
+    A[1::3, 0:3] =  wp
+    A[1::3, 6:9] = -xp
+    A[2::3, 0:3] = -yp
+    A[2::3, 3:6] =  xp
+
+    U, e, V      = numpy.linalg.svd(A, full_matrices=False)
+
+    mx33         = V[-1].reshape(3,3).T
+    mx44         = mat4()
+    mx44[:2,:2]  = mx33[:2,:2]
+    mx44[3,:2]   = mx33[ 2,:2]
+    mx44[:2,3]   = mx33[:2, 2]
+    mx44[3,3]    = mx33[ 2, 2]
+    mx44[2,2]    = 0
+    return mx44
+
 
 def vecspace2( z, x, righthanded=True ):
     'obect space matrix along a given z axis'
