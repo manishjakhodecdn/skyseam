@@ -72,11 +72,25 @@ class ExrInfo( object ):
         if status != 0:
             self.error = str( error_p[0] )
 
+    def shuffleChannels( self, new_order = None):
+        if new_order is None:
+            new_order = [2,1,0,3]
+
+        rgba = [self.buffer[:,:,0].copy()
+               ,self.buffer[:,:,1].copy()
+               ,self.buffer[:,:,2].copy()
+               ,self.buffer[:,:,3].copy()]
+
+        for count, newidx in enumerate(new_order):
+            self.buffer[:,:,count] = rgba[newidx]
+
+        self.buffer = numpy.ascontiguousarray(self.buffer)
+
     def sizeFromOrig( self ):
         self.width  = min( self.max_width, self.orig_width )
 
         if self.aspect is not None:
-            aspect = self.descriptor.aspectratio
+            aspect = self.aspect
         else:               
             aspect = self.orig_width / float(self.orig_height)
 
@@ -134,8 +148,8 @@ class ExrInfo( object ):
 
     def namedChannel( self ):
         def closure( name, value ):
-            channels = self.attributes.get( self.channels, {})
-            channels[name] = value
+            channels = self.attributes.get( self.channels, [])
+            channels.append( (name, value) )
             self.attributes[self.channels] = channels
             return 0
         return self.Named_Channel_Function_p(closure)
